@@ -50,14 +50,15 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    const inTime = getCurrentTime();
+    // ✅ Store inTime as IST string
+    const inTime = moment.tz("Asia/Kolkata").format("HH:mm:ss");
     const hour = parseInt(moment.tz("Asia/Kolkata").format("HH"));
     const status = hour > 10 ? "Late" : "Present";
 
     const attendance = new attendanceTbl({
       employeeId,
-      date: getISTDate(),
-      inTime,
+      date: todayStart,       // keep Date object for queries
+      inTime,                 // IST string
       location: { latitude, longitude },
       status,
       statusType: "Auto",
@@ -93,7 +94,9 @@ const markSession = async (req, res) => {
 
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
-    const currentTime = getCurrentTime();
+
+    // ✅ IST string for current time
+    const currentTime = moment.tz("Asia/Kolkata").format("HH:mm:ss");
 
     let attendance = await attendanceTbl.findOne({
       employeeId,
@@ -103,7 +106,7 @@ const markSession = async (req, res) => {
     if (!attendance && actionType === "in") {
       attendance = new attendanceTbl({
         employeeId,
-        date: getISTDate(),
+        date: todayStart,
         inTime: currentTime,
         location: { latitude, longitude },
         status: "Present",
@@ -120,7 +123,7 @@ const markSession = async (req, res) => {
         }
       } else if (actionType === "out") {
         if (last && !last.outTime) {
-          last.outTime = currentTime;
+          last.outTime = currentTime; // store IST string
         } else {
           return res.status(400).json({
             success: false,
@@ -139,6 +142,7 @@ const markSession = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
 const getMonthlyAttendance = async (req, res) => {
   try {
     const { month } = req.query;
