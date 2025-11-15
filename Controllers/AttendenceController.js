@@ -1,18 +1,14 @@
 const attendanceTbl = require("../Modals/Attendence");
 const { getDistance } = require("geolib");
-const moment = require("moment-timezone");
+const moment = require("moment-timezone"); 
 
-// ✅ Keep both same as markAttendance
 const officeLocation = {
   latitude: 26.88925,
   longitude: 80.99116,
 };
 
-// ✅ Always get current IST date & time
 const getISTDate = () => {
-  return new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
-  );
+  return moment.tz(new Date(), "Asia/Kolkata").toDate();
 };
 
 const getCurrentTime = () => {
@@ -23,94 +19,6 @@ const isWithinOfficeRange = (lat, lon) => {
   if (!lat || !lon) return false;
   const distance = getDistance({ latitude: lat, longitude: lon }, officeLocation);
   return distance <= 200;
-};
-
-// ✅ Mark session (in/out)
-const markSession = async (req, res) => {
-  try {
-    const { employeeId, latitude, longitude, actionType } = req.body;
-
-    // Verify location within allowed radius
-    const distance = getDistance(
-      { latitude, longitude },
-      { latitude: officeLocation.latitude, longitude: officeLocation.longitude }
-    );
-
-    if (distance > 200) {
-      return res.status(400).json({
-        success: false,
-        message: "You are not within the office location range.",
-      });
-    }
-
-    const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
-    const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
-
-    // Fetch today's attendance
-    let attendance = await attendanceTbl.findOne({
-      employeeId,
-      date: { $gte: todayStart, $lte: todayEnd },
-    });
-
-    // ✅ Get current IST time (same as markAttendance)
-    const currentTime = getCurrentTime();
-    const currentDate = getISTDate();
-
-    if (!attendance && actionType === "in") {
-      // First check-in of the day
-      attendance = new attendanceTbl({
-        employeeId,
-        date: currentDate,
-        inTime: currentTime,
-        location: { latitude, longitude },
-        status: "Present",
-        statusType: "Auto",
-        inOutLogs: [{ inTime: currentTime, outTime: null }],
-      });
-    } else if (attendance) {
-      const lastLog = attendance.inOutLogs[attendance.inOutLogs.length - 1];
-
-      if (actionType === "in") {
-        if (!lastLog || lastLog.outTime) {
-          attendance.inOutLogs.push({ inTime: currentTime, outTime: null });
-        } else {
-          return res.status(400).json({
-            success: false,
-            message: "You are already checked in. Please check out first.",
-          });
-        }
-      } else if (actionType === "out") {
-        if (lastLog && !lastLog.outTime) {
-          lastLog.outTime = currentTime;
-        } else {
-          return res.status(400).json({
-            success: false,
-            message: "You are already checked out or not checked in yet.",
-          });
-        }
-      }
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "No attendance record found for today.",
-      });
-    }
-
-    await attendance.save();
-
-    res.status(200).json({
-      success: true,
-      message: `Successfully marked ${actionType === "in" ? "Check-In" : "Check-Out"} at ${currentTime}`,
-      attendance,
-    });
-  } catch (error) {
-    console.error("Error in markSession:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error marking session",
-      error: error.message,
-    });
-  }
 };
 
 const markAttendance = async (req, res) => {
@@ -168,6 +76,69 @@ const markAttendance = async (req, res) => {
   }
 };
 
+const markSession = async (req, res) => {
+  try {
+    const { employeeId, latitude, longitude, actionType } = req.body;
+
+    if (!employeeId || !latitude || !longitude || !actionType) {
+      return res.status(400).json({ success: false, message: "Missing fields" });
+    }
+
+    if (!isWithinOfficeRange(latitude, longitude)) {
+      return res.status(403).json({
+        success: false,
+        message: "You are outside the allowed office location",
+      });
+    }
+
+    const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
+    const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
+    const currentTime = getCurrentTime();
+
+    let attendance = await attendanceTbl.findOne({
+      employeeId,
+      date: { $gte: todayStart, $lte: todayEnd },
+    });
+
+    if (!attendance && actionType === "in") {
+      attendance = new attendanceTbl({
+        employeeId,
+        date: getISTDate(),
+        inTime: currentTime,
+        location: { latitude, longitude },
+        status: "Present",
+        statusType: "Auto",
+        inOutLogs: [{ inTime: currentTime, outTime: null }],
+      });
+    } else if (attendance) {
+      const last = attendance.inOutLogs[attendance.inOutLogs.length - 1];
+      if (actionType === "in") {
+        if (!last || last.outTime) {
+          attendance.inOutLogs.push({ inTime: currentTime, outTime: null });
+        } else {
+          return res.status(400).json({ success: false, message: "Already checked in" });
+        }
+      } else if (actionType === "out") {
+        if (last && !last.outTime) {
+          last.outTime = currentTime;
+        } else {
+          return res.status(400).json({
+            success: false,
+            message: "Already checked out or no session started",
+          });
+        }
+      }
+    } else {
+      return res.status(400).json({ success: false, message: "No attendance record for today" });
+    }
+
+    const saved = await attendance.save();
+    res.status(200).json({ success: true, message: "Session updated", data: saved });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
 const getMonthlyAttendance = async (req, res) => {
   try {
     const { month } = req.query;

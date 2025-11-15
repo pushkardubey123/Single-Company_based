@@ -55,6 +55,7 @@ app.use("/api/meeting", require("./Router/meetingRoutes"));
 app.use("/api/jobs", require("./Router/jobRoutes"));
 require("./utils/taskDeadlineNotifier")();
 require("./utils/birthdayAnniversaryNotifier")();
+app.use("/api", require("./Router/branchRoutes"));
 const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => {
   console.log(`Server is running on: ${PORT}`);

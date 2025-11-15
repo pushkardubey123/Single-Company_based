@@ -12,6 +12,7 @@ const UserSchema = new mongoose.Schema(
     address: String,
     departmentId: { type: mongoose.Schema.Types.ObjectId, ref: "Department" },
     designationId: { type: mongoose.Schema.Types.ObjectId, ref: "Designation" },
+    branchId: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
     shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift" },
     doj: Date,
     status: {

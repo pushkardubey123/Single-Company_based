@@ -23,6 +23,7 @@ const register = async (req, res) => {
       emergencyContact,
       pan,
       bankAccount,
+      branchId
     } = req.body;
 
     const emailExists =
@@ -81,6 +82,7 @@ const register = async (req, res) => {
       profilePic: profilePic || null,
       pan,
       bankAccount,
+      branchId
     });
 
     await pendingUser.save();
@@ -101,7 +103,8 @@ const getPendingUsers = async (req, res) => {
       .find()
       .populate("departmentId", "name")
       .populate("designationId", "name")
-      .populate("shiftId", "name");
+      .populate("shiftId", "name")
+      .populate("branchId", "name");
 
     res.json({
       success: true,
@@ -132,12 +135,14 @@ const approvePendingUser = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
 
-    const user = new userTbl({
-      ...pendingUser.toObject(),
-      passwordHash: hashedPassword,
-      role: "employee",
-      basicSalary: basicSalary || 0,
-    });
+const user = new userTbl({
+  ...pendingUser.toObject(),
+  passwordHash: hashedPassword,
+  role: "employee",
+  basicSalary: basicSalary || 0,
+  branchId: pendingUser.branchId
+});
+
 
     await user.save();
     await pendingTbl.findByIdAndDelete(req.params.id);
@@ -284,7 +289,8 @@ const getAllUsers = async (req, res) => {
       .select("-passwordHash")
       .populate("departmentId", "name")
       .populate("designationId", "name")
-      .populate("shiftId", "name");
+      .populate("shiftId", "name")
+      .populate("branchId", "name");
 
     res.json({
       success: true,
