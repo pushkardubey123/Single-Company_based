@@ -18,7 +18,7 @@ const verifyFaceUsingPython = async (storedImagePath, liveImageBase64) => {
   });
 
   const response = await axios.post(
-    "http://127.0.0.1:8000/verify-face",
+    "https://facerepodetection-production.up.railway.app/verify-face",
     form,
     { headers: form.getHeaders() }
   );
