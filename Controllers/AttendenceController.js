@@ -1,6 +1,10 @@
 const attendanceTbl = require("../Modals/Attendence");
 const { getDistance } = require("geolib");
 const moment = require("moment-timezone"); 
+const verifyFacePython = require("../utils/faceVerify.py-api");
+const path = require("path");
+const userTbl = require("../Modals/User");
+
 
 const officeLocation = {
   latitude: 26.88925,
@@ -23,11 +27,32 @@ const isWithinOfficeRange = (lat, lon) => {
 
 const markAttendance = async (req, res) => {
   try {
-    const { employeeId, latitude, longitude } = req.body;
-    if (!employeeId || !latitude || !longitude) {
+    const { employeeId, latitude, longitude, liveImage } = req.body;
+
+    if (!employeeId || !latitude || !longitude || !liveImage) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
+    // =============== FACE VERIFICATION =============== //
+
+    const employee = await userTbl.findById(employeeId);
+    if (!employee || !employee.profilePic) {
+      return res.status(404).json({ success: false, message: "Employee image not found" });
+    }
+
+    const storedImagePath = path.join(__dirname, "..", "uploads", employee.profilePic);
+
+    // Python DeepFace API call
+    const faceResult = await verifyFacePython(storedImagePath, liveImage);
+
+    if (!faceResult?.success || faceResult?.verified !== true) {
+      return res.status(401).json({
+        success: false,
+        message: "Face not matched! Attendance denied",
+      });
+    }
+
+    // =============== GPS VALIDATION =============== //
     if (!isWithinOfficeRange(latitude, longitude)) {
       return res.status(403).json({
         success: false,
@@ -35,6 +60,7 @@ const markAttendance = async (req, res) => {
       });
     }
 
+    // =============== DUPLICATE CHECK =============== //
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
 
@@ -65,16 +91,19 @@ const markAttendance = async (req, res) => {
     });
 
     const result = await attendance.save();
+
     res.status(201).json({
       success: true,
       message: "Attendance marked successfully",
       data: result,
     });
+
   } catch (err) {
-    console.error(err);
+    console.error("Mark attendance error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
 
 const markSession = async (req, res) => {
   try {
