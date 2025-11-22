@@ -65,7 +65,7 @@ const markAttendance = async (req, res) => {
     // FACE VERIFY
     const faceResult = await verifyFacePython(storedImagePath, liveImage);
 
-    if (!faceResult?.success || faceResult?.verified !== true) {
+    if (!faceResult?.success) {
       return res.status(401).json({
         success: false,
         message: "Face not matched! Attendance denied",

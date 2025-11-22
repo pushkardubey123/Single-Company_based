@@ -5,10 +5,15 @@ const fs = require("fs");
 const verifyFaceUsingPython = async (storedImagePath, liveImageBase64) => {
   const form = new FormData();
 
-  const liveBuffer = Buffer.from(
-    liveImageBase64.replace(/^data:image\/\w+;base64,/, ""),
-    "base64"
-  );
+let base64Data = liveImageBase64;
+
+// if header exists, remove
+if (base64Data.includes("base64,")) {
+  base64Data = base64Data.split("base64,")[1];
+}
+
+const liveBuffer = Buffer.from(base64Data, "base64");
+
 
   form.append("stored_image", fs.createReadStream(storedImagePath));
   form.append("live_image", liveBuffer, {
