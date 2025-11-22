@@ -5,7 +5,6 @@ const fs = require("fs");
 const verifyFaceUsingPython = async (storedImagePath, liveImageBase64) => {
   const form = new FormData();
 
-  // Convert live base64 to buffer
   const liveBuffer = Buffer.from(
     liveImageBase64.replace(/^data:image\/\w+;base64,/, ""),
     "base64"

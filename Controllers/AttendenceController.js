@@ -2,8 +2,22 @@ const attendanceTbl = require("../Modals/Attendence");
 const { getDistance } = require("geolib");
 const moment = require("moment-timezone"); 
 const verifyFacePython = require("../utils/faceVerify.py-api");
-const path = require("path");
 const userTbl = require("../Modals/User");
+
+const fs = require("fs");
+const path = require("path");
+
+const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
+
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+const PROFILE_DIR = path.join(UPLOADS_DIR, "profiles");
+
+if (!fs.existsSync(PROFILE_DIR)) {
+  fs.mkdirSync(PROFILE_DIR, { recursive: true });
+}
 
 
 const officeLocation = {
@@ -33,16 +47,22 @@ const markAttendance = async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
-    // =============== FACE VERIFICATION =============== //
-
     const employee = await userTbl.findById(employeeId);
+
     if (!employee || !employee.profilePic) {
-      return res.status(404).json({ success: false, message: "Employee image not found" });
+      return res.status(404).json({ success: false, message: "Employee image missing" });
     }
 
     const storedImagePath = path.join(__dirname, "..", "uploads", employee.profilePic);
 
-    // Python DeepFace API call
+    if (!fs.existsSync(storedImagePath)) {
+      return res.status(404).json({
+        success: false,
+        message: "Stored profile image not found on server"
+      });
+    }
+
+    // FACE VERIFY
     const faceResult = await verifyFacePython(storedImagePath, liveImage);
 
     if (!faceResult?.success || faceResult?.verified !== true) {
@@ -52,15 +72,12 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // =============== GPS VALIDATION =============== //
+    // GPS VALIDATION
     if (!isWithinOfficeRange(latitude, longitude)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are outside the allowed office location",
-      });
+      return res.status(403).json({ success: false, message: "You are outside office range" });
     }
 
-    // =============== DUPLICATE CHECK =============== //
+    // DUPLICATE CHECK
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
 
@@ -72,7 +89,7 @@ const markAttendance = async (req, res) => {
     if (alreadyMarked) {
       return res.status(400).json({
         success: false,
-        message: "Attendance already marked for today",
+        message: "Attendance already marked",
       });
     }
 
@@ -103,6 +120,7 @@ const markAttendance = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
+
 
 
 const markSession = async (req, res) => {
