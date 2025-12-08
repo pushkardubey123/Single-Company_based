@@ -62,7 +62,6 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // FACE VERIFY
     const faceResult = await verifyFacePython(storedImagePath, liveImage);
 
     if (!faceResult?.success) {

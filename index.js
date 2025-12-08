@@ -21,7 +21,7 @@ app.use(
 );
 
 dbConnect();
-
+app.use("/api/settings", require("./Router/companySettings"));
 app.use(express.json());
 
 app.use(
@@ -56,7 +56,9 @@ app.use("/api/jobs", require("./Router/jobRoutes"));
 require("./utils/taskDeadlineNotifier")();
 require("./utils/birthdayAnniversaryNotifier")();
 app.use("/api", require("./Router/branchRoutes"));
+
 const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => {
   console.log(`Server is running on: ${PORT}`);
 });
+ 
