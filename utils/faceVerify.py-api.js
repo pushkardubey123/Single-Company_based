@@ -19,9 +19,10 @@ const liveBuffer = Buffer.from(base64Data, "base64");
     filename: "live.jpg",
     contentType: "image/jpeg",
   });
+  
 
   const response = await axios.post(
-    "https://facerepodetection-production.up.railway.app/verify-face",
+    "https://face-repo-detection.onrender.com/verify-face",
     form,
     { headers: form.getHeaders() }
   );
