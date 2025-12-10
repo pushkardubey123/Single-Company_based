@@ -355,7 +355,9 @@ const updateUser = async (req, res) => {
     const emp = await userTbl.findById(req.params.id);
     if (!emp) return res.status(404).json({ message: "User not found" });
 
-    let profilePic = em
+    let profilePic = emp.profilePic;
+
+  
     if (req.files && req.files.profilePic) {
       const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
