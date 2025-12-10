@@ -17,7 +17,6 @@ const authMiddleware = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // ✅ Get full user details
     const user = await User.findById(decoded.id).select("name email role");
 
     if (!user) {

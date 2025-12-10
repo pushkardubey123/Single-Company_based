@@ -17,13 +17,11 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// GET settings
 router.get("/", async (req, res) => {
   const data = await CompanySettings.findOne();
   res.json({ success: true, data });
 });
 
-// UPDATE settings
 router.put("/", upload.single("logo"), async (req, res) => {
   let updateData = {
     name: req.body.name,
@@ -45,7 +43,6 @@ router.put("/", upload.single("logo"), async (req, res) => {
   res.json({ success: true, data: settings });
 });
 
-// DELETE LOGO
 router.delete("/logo", async (req, res) => {
   try {
     const settings = await CompanySettings.findOne();
@@ -68,7 +65,6 @@ router.delete("/logo", async (req, res) => {
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
-// DELETE single field
 router.delete("/:field", async (req, res) => {
   try {
     const { field } = req.params;
@@ -81,13 +77,11 @@ router.delete("/:field", async (req, res) => {
 
     const settings = await CompanySettings.findOne();
 
-    // If deleting logo → delete file also
     if (field === "logo" && settings?.logo) {
       const filePath = path.join(__dirname, "..", settings.logo.replace("/static", "uploads"));
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
-    // Update only selected field
     const updateObj = {};
     updateObj[field] = "";
 

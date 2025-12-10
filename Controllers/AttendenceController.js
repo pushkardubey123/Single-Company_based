@@ -71,12 +71,10 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // GPS VALIDATION
     if (!isWithinOfficeRange(latitude, longitude)) {
       return res.status(403).json({ success: false, message: "You are outside office range" });
     }
 
-    // DUPLICATE CHECK
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
 

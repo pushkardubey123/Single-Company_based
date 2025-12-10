@@ -7,7 +7,6 @@ const verifyFaceUsingPython = async (storedImagePath, liveImageBase64) => {
 
 let base64Data = liveImageBase64;
 
-// if header exists, remove
 if (base64Data.includes("base64,")) {
   base64Data = base64Data.split("base64,")[1];
 }

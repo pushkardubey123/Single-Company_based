@@ -6,7 +6,7 @@ const companySchema = new mongoose.Schema({
   phone: { type: String, default: "" },
   address: { type: String, default: "" },
   website: { type: String, default: "" },
-  logo: { type: String, default: "" }, // image path
+  logo: { type: String, default: "" },
 });
 
 module.exports = mongoose.model("CompanySettings", companySchema);

@@ -351,41 +351,44 @@ const getUserById = async (req, res) => {
 };
 
 const updateUser = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.json({
-      success: false,
-      error: true,
-      message: "Access denied",
-      code: 403,
-    });
-  }
   try {
-    const updated = await userTbl.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
+    const emp = await userTbl.findById(req.params.id);
+    if (!emp) return res.status(404).json({ message: "User not found" });
+
+    let profilePic = em
+    if (req.files && req.files.profilePic) {
+      const img = req.files.profilePic;
+      const uploadPath = "uploads/profiles";
+
+      if (!fs.existsSync(uploadPath)) {
+        fs.mkdirSync(uploadPath, { recursive: true });
+      }
+
+      if (profilePic) {
+        const oldImage = path.join("uploads", profilePic);
+        if (fs.existsSync(oldImage)) fs.unlinkSync(oldImage);
+      }
+
+      const filename = Date.now() + "_" + img.name;
+      const fullPath = path.join(uploadPath, filename);
+
+      await img.mv(fullPath);
+
+      profilePic = `profiles/${filename}`;
+    }
+
+    await userTbl.findByIdAndUpdate(req.params.id, {
+      ...req.body,
+      profilePic
     });
-    if (!updated)
-      return res.json({
-        success: false,
-        error: true,
-        message: "User not found",
-        code: 404,
-      });
-    res.json({
-      success: true,
-      error: false,
-      message: "Updated",
-      code: 200,
-      data: updated,
-    });
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+
+    res.json({ success: true, message: "Employee updated successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Update failed" });
   }
 };
+
 
 const deleteUser = async (req, res) => {
   if (req.user.role !== "admin") {

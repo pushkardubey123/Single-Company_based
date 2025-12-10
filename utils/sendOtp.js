@@ -2,16 +2,15 @@ const nodemailer = require("nodemailer");
 
 const sendOTP = async (email, otp) => {
   try {
-    // Gmail SMTP Transporter
+    
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user: process.env.EMAIL_USER, // your Gmail address
-        pass: process.env.EMAIL_PASS, // 16-character App Password (not your normal password)
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS, 
       },
     });
 
-    // Email content
     const mailOptions = {
       from: `"HRMS App" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -28,11 +27,10 @@ const sendOTP = async (email, otp) => {
       `,
     };
 
-    // Send mail
     await transporter.sendMail(mailOptions);
-    console.log(`✅ OTP sent successfully to ${email}`);
+    console.log(`OTP sent successfully to ${email}`);
   } catch (error) {
-    console.error("❌ Error sending OTP email:", error);
+    console.error("Error sending OTP email:", error);
     throw new Error("Failed to send OTP email");
   }
 };
