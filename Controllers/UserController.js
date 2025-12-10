@@ -357,7 +357,7 @@ const updateUser = async (req, res) => {
 
     let profilePic = emp.profilePic;
 
-  
+   
     if (req.files && req.files.profilePic) {
       const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
