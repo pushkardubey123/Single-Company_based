@@ -275,14 +275,6 @@ const userResetPassword = async (req, res) => {
   res.json({ success: true, message: "Password changed !" });
 };
 const getAllUsers = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.json({
-      success: false,
-      error: true,
-      message: "Access denied",
-      code: 403,
-    });
-  }
   try {
     const users = await userTbl
       .find({ role: "employee" })
