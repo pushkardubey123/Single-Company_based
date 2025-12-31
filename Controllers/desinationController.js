@@ -2,134 +2,135 @@ const Designation = require("../Modals/Designation");
 
 const addDesignation = async (req, res) => {
   try {
-    const { name, departmentId } = req.body;
+    const { name, branchId, departmentId } = req.body;
 
-    const existing = await Designation.findOne({ name, departmentId });
-    if (existing) {
-      return res.json({
+    if (!name || !branchId || !departmentId) {
+      return res.status(400).json({
         success: false,
-        error: true,
-        message: "Designation already exists in this department",
-        code: 400,
+        message: "All fields are required",
       });
     }
 
-    const designation = new Designation({ name, departmentId });
-    const result = await designation.save();
-
-    if (result) {
-      res.json({
-        success: true,
-        error: false,
-        message: "Designation created successfully",
-        code: 201,
-        data: result,
-      });
-    } else {
-      res.json({
-        success: false,
-        error: true,
-        message: "Designation creation failed",
-        code: 400,
-      });
-    }
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
+    const designation = await Designation.create({
+      name,
+      branchId,
+      departmentId,
+      companyId: req.companyId, // 🔥 FIX
     });
+
+    res.status(201).json({
+      success: true,
+      message: "Designation created",
+      data: designation,
+    });
+  } catch (err) {
+    console.error("ADD DESIGNATION ERROR:", err);
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
+
 
 const getDesignations = async (req, res) => {
   try {
-    const data = await Designation.find().populate("departmentId", "name");
-    res.json({
-      success: true,
-      error: false,
-      message: "Designations fetched successfully",
-      code: 200,
-      data,
-    });
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    const { branchId, departmentId } = req.query;
+
+    const filter = {
+      companyId: req.companyId, // 🔥 MOST IMPORTANT
+    };
+
+    if (branchId) filter.branchId = branchId;
+    if (departmentId) filter.departmentId = departmentId;
+
+    const data = await Designation.find(filter)
+      .populate("branchId", "name")
+      .populate("departmentId", "name")
+      .select("name branchId departmentId")
+      .sort({ name: 1 });
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("GET DESIGNATION ERROR:", err);
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
+
 const updateDesignation = async (req, res) => {
   try {
-    const { name, departmentId } = req.body;
-
-    const updated = await Designation.findByIdAndUpdate(
-      req.params.id,
-      { name, departmentId },
+    const updated = await Designation.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        companyId: req.companyId, // 🔥 security
+      },
+      req.body,
       { new: true }
     );
 
     if (!updated) {
-      return res.json({
+      return res.status(404).json({
         success: false,
-        error: true,
         message: "Designation not found",
-        code: 404,
       });
     }
 
     res.json({
       success: true,
-      error: false,
-      message: "Designation updated successfully",
-      code: 200,
+      message: "Designation updated",
       data: updated,
     });
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
+
+
 
 const deleteDesignation = async (req, res) => {
   try {
-    const deleted = await Designation.findByIdAndDelete(req.params.id);
+    const deleted = await Designation.findOneAndDelete({
+      _id: req.params.id,
+      companyId: req.companyId, // 🔥 security
+    });
+
     if (!deleted) {
-      return res.json({
+      return res.status(404).json({
         success: false,
-        error: true,
         message: "Designation not found",
-        code: 404,
       });
     }
 
     res.json({
       success: true,
-      error: false,
-      message: "Designation deleted successfully",
-      code: 200,
+      message: "Designation deleted",
     });
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
+
+const getPublicDesignations = async (req, res) => {
+  try {
+    const { companyId, branchId, departmentId } = req.query;
+
+    const filter = {};
+    if (companyId) filter.companyId = companyId;
+    if (branchId) filter.branchId = branchId;
+    if (departmentId) filter.departmentId = departmentId;
+
+    const data = await Designation.find(filter)
+      .select("_id name departmentId");
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 
 module.exports = {
   addDesignation,
   getDesignations,
   updateDesignation,
   deleteDesignation,
+  getPublicDesignations
 };

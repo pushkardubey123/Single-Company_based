@@ -1,10 +1,21 @@
 const Application = require("../Modals/Application");
 const path = require("path");
 const fs = require("fs");
+const Job = require("../Modals/Job");
 
 exports.applyJob = async (req, res) => {
   try {
-    const body = { ...req.body };
+    const job = await Job.findById(req.body.jobId);
+
+    if (!job) {
+      return res.status(404).json({ message: "Job not found" });
+    }
+
+    const body = {
+      ...req.body,
+      companyId: job.companyId,
+      branchId: job.branchId,
+    };
 
     if (req.files) {
       const uploadDir = "uploads/applications";
@@ -42,34 +53,56 @@ exports.applyJob = async (req, res) => {
     const application = await Application.create(body);
     res.status(201).json({ success: true, data: application });
   } catch (err) {
-    console.error(err);
     res.status(400).json({ success: false, message: err.message });
   }
 };
 
 exports.getApplications = async (req, res) => {
   try {
-    const data = await Application.find().populate(
-      "jobId",
-      "title departmentId designationId"
-    );
-    res.json({ success: true, data });
+    const filter = {
+      companyId: req.companyId,
+    };
+
+    // 🔥 only restrict branch if branchId exists (branch admin)
+    if (req.branchId) {
+      filter.branchId = req.branchId;
+    }
+
+    const apps = await Application.find(filter)
+      .populate("jobId", "title")
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: apps });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
+
 exports.getApplicationById = async (req, res) => {
   try {
-    const application = await Application.findById(req.params.id).populate(
-      "jobId",
-      "title description"
-    );
+    const filter = {
+      _id: req.params.id,
+      companyId: req.companyId,
+    };
+
+    if (req.branchId) {
+      filter.branchId = req.branchId;
+    }
+
+    const application = await Application.findOne(filter)
+      .populate("jobId", "title description");
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+
     res.json({ success: true, data: application });
   } catch (err) {
     res.status(404).json({ success: false, message: err.message });
   }
 };
+
 
 exports.rejectApplication = async (req, res) => {
   try {

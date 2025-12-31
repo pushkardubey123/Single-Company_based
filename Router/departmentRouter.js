@@ -1,16 +1,27 @@
 const express = require("express");
 const router = express.Router();
+
 const auth = require("../Middleware/auth");
+const attachCompanyId = require("../Middleware/companyMiddleware");
+
 const {
   addDepartment,
   getDepartments,
   updateDepartment,
   deleteDepartment,
+  getPublicDepartments
 } = require("../Controllers/departmentController");
 
-router.post("/", auth, addDepartment);
-router.get("/", getDepartments);
-router.put("/:id", auth, updateDepartment);
-router.delete("/:id", auth, deleteDepartment);
+// ADMIN
+router.post("/", auth, attachCompanyId, addDepartment);
+router.put("/:id", auth, attachCompanyId, updateDepartment);
+router.delete("/:id", auth, attachCompanyId, deleteDepartment);
+// ADMIN
+router.get("/", auth, attachCompanyId, getDepartments);
+
+// PUBLIC
+router.get("/public", getPublicDepartments);
+
+
 
 module.exports = router;

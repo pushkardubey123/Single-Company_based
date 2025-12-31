@@ -57,6 +57,8 @@ exports.scheduleInterview = async (req, res) => {
     const calendarEventId = response.data.id;
 
     const interview = new Interview({
+        companyId: application.companyId,     
+  branchId: application.branchId,       
       applicationId,
       jobId: application.jobId._id,
       candidateEmail,

@@ -2,12 +2,14 @@ const express = require("express");
 const router = express.Router();
 const verifyToken = require("../Middleware/auth");
 const projectController = require("../Controllers/projectController");
+const attachCompanyId = require("../Middleware/companyMiddleware");
 
-router.post("/projects", verifyToken, projectController.createProject);
-router.get("/", verifyToken, projectController.getAllProjects);
-router.get("/:id", verifyToken, projectController.getProjectById);
-router.put("/:id", verifyToken, projectController.updateProject);
-router.delete("/:id", verifyToken, projectController.deleteProject);
+router.post("/projects", verifyToken, attachCompanyId, projectController.createProject);
+router.get("/", verifyToken, attachCompanyId, projectController.getAllProjects);
+router.get("/:id", verifyToken, attachCompanyId, projectController.getProjectById);
+router.put("/:id", verifyToken, attachCompanyId, projectController.updateProject);
+router.delete("/:id", verifyToken, attachCompanyId, projectController.deleteProject);
+
 
 router.post("/:id/tasks", verifyToken, projectController.addTaskToProject);
 router.delete(

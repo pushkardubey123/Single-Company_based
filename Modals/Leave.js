@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+const mongoose = require("mongoose")
 
 const leaveSchema = new mongoose.Schema(
   {
@@ -7,23 +7,29 @@ const leaveSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      required: true,
+      index: true,
+    },
+
     leaveType: {
       type: String,
       enum: ["Casual", "Sick", "Earned"],
       required: true,
     },
-    startDate: {
-      type: Date,
-      required: true,
-    },
-    endDate: {
-      type: Date,
-      required: true,
-    },
-    reason: {
-      type: String,
-      required: true,
-    },
+    startDate: Date,
+    endDate: Date,
+    reason: String,
     status: {
       type: String,
       enum: ["Pending", "Approved", "Rejected"],
@@ -37,6 +43,4 @@ const leaveSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-const leaveTbl = mongoose.model("Leave", leaveSchema);
-
-module.exports = leaveTbl;
+module.exports = mongoose.model("Leave", leaveSchema);

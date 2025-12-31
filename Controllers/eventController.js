@@ -1,6 +1,5 @@
 const Event = require("../Modals/Event");
 const User = require("../Modals/User");
-
 exports.createEvent = async (req, res) => {
   try {
     const {
@@ -9,12 +8,21 @@ exports.createEvent = async (req, res) => {
       startDate,
       endDate,
       color,
-      departmentId, 
-      employeeId, 
-      createdBy,
+      departmentId,
+      employeeId,
+      branchId, // ✅ ADD THIS
     } = req.body;
 
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch is required",
+      });
+    }
+
     const newEvent = new Event({
+      companyId: req.companyId,
+      branchId, // ✅ SAVE IT
       title,
       description,
       startDate,
@@ -22,58 +30,97 @@ exports.createEvent = async (req, res) => {
       color,
       departmentId,
       employeeId,
-      createdBy,
+      createdBy: req.user._id,
     });
 
     const savedEvent = await newEvent.save();
 
     res.status(201).json({
+      success: true,
       message: "Event created successfully",
       event: savedEvent,
     });
   } catch (error) {
     console.error("Error creating event:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
 exports.getAllEvents = async (req, res) => {
   try {
-    const events = await Event.find()
+    const filter = {
+      companyId: req.companyId,
+    };
+
+    if (req.user.role !== "admin") {
+      filter.branchId = req.branchId;
+    }
+
+    const events = await Event.find(filter)
       .populate("createdBy", "name email")
       .populate("departmentId", "name")
       .populate("employeeId", "name email");
-    res.json(events);
+
+    res.json({ success: true, data: events });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 exports.updateEvent = async (req, res) => {
   try {
-    const updated = await Event.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(updated);
+    const updated = await Event.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        companyId: req.companyId,
+        branchId: req.branchId,
+      },
+      req.body,
+      { new: true }
+    );
+
+    if (!updated) {
+      return res.status(404).json({ success: false });
+    }
+
+    res.json({ success: true, data: updated });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
 exports.deleteEvent = async (req, res) => {
   try {
-    await Event.findByIdAndDelete(req.params.id);
-    res.json({ message: "Event deleted" });
+    const deleted = await Event.findOneAndDelete({
+      _id: req.params.id,
+      companyId: req.companyId,
+      branchId: req.branchId,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({ success: false });
+    }
+
+    res.json({ success: true, message: "Event deleted" });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
-}
+};
 
 exports.gelOneEvent = async (req, res) => {
   try {
     const userId = req.params.id;
 
-    const employee = await User.findById(userId);
+    const employee = await User.findOne({
+      _id: userId,
+      companyId: req.companyId,
+      branchId: req.branchId,
+    });
+
     if (!employee) {
-      return res.status(404).json({ error: "Employee not found" });
+      return res.status(404).json({ success: false, message: "Employee not found" });
     }
 
     const departmentIds = Array.isArray(employee.department)
@@ -81,6 +128,8 @@ exports.gelOneEvent = async (req, res) => {
       : [employee.department];
 
     const events = await Event.find({
+      companyId: req.companyId,
+      branchId: req.branchId,
       $or: [
         { employeeId: userId },
         { departmentId: { $in: departmentIds } },
@@ -89,9 +138,9 @@ exports.gelOneEvent = async (req, res) => {
       .populate("createdBy", "name")
       .populate("departmentId", "name");
 
-    res.status(200).json(events);
+    res.json({ success: true, data: events });
   } catch (error) {
     console.error("Error fetching employee events:", error);
-    res.status(500).json({ error: "Failed to fetch employee events" });
+    res.status(500).json({ success: false, message: error.message });
   }
-}
+};

@@ -1,6 +1,18 @@
 const mongoose = require("mongoose");
 
 const documentSchema = new mongoose.Schema({
+companyId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Company",
+    required: true,
+    index: true,
+  },
+  branchId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Branch",
+    required: true,
+    index: true,
+  },
   employeeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

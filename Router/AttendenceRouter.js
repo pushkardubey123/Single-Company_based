@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const auth = require("../Middleware/auth");
+const attachCompanyId = require("../Middleware/companyMiddleware");
 
 const {
   markAttendance,
@@ -13,13 +14,16 @@ const {
   getMonthlyAttendance,
 } = require("../Controllers/AttendenceController");
 
-router.post("/mark", auth, markAttendance);
-router.post("/session", auth, markSession);
-router.get("/", auth, getAllAttendance);
-router.get("/employee/:id", auth, getAttendanceByEmployee);
-router.put("/:id", auth, updateAttendance);
-router.delete("/:id", auth, deleteAttendance);
-router.post("/bulk", auth, bulkMarkAttendance);
-router.get("/monthly", auth, getMonthlyAttendance);
+// 🔐 AUTH REQUIRED
+router.post("/mark", auth,attachCompanyId, markAttendance);
+router.post("/session", auth,attachCompanyId, markSession);
+
+// ✅ ADD attachCompanyId HERE
+router.get("/", auth, attachCompanyId, getAllAttendance);
+router.get("/employee/:id", auth, attachCompanyId, getAttendanceByEmployee);
+router.put("/:id", auth, attachCompanyId, updateAttendance);
+router.delete("/:id", auth, attachCompanyId, deleteAttendance);
+router.post("/bulk", auth, attachCompanyId, bulkMarkAttendance);
+router.get("/monthly", auth, attachCompanyId, getMonthlyAttendance);
 
 module.exports = router;

@@ -1,6 +1,11 @@
 const mongoose = require("mongoose");
 
 const PendingUserSchema = new mongoose.Schema({
+  companyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true
+      },
   name: String,
   email: { type: String, required: true, unique: true },
   phone: String,

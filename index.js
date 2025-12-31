@@ -21,7 +21,6 @@ app.use(
 );
 
 dbConnect();
-app.use("/api/settings", require("./Router/companySettings"));
 app.use(express.json());
 
 app.use(
@@ -56,6 +55,10 @@ app.use("/api/jobs", require("./Router/jobRoutes"));
 require("./utils/taskDeadlineNotifier")();
 require("./utils/birthdayAnniversaryNotifier")();
 app.use("/api", require("./Router/branchRoutes"));
+app.use("/api/leads", require("./Router/leadRoutes"));
+app.use("/api/settings", require("./Router/companySettings"));
+app.use("/api/officetimming", require("./Router/officeTimingRoutes"));
+require("./utils/autoAbsent")();
 
 const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => {

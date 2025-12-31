@@ -8,11 +8,12 @@ const {
   deleteInterview,
 } = require("../Controllers/InterviewController");
 const auth = require("../Middleware/auth");
+const attachCompanyId= require("../Middleware/companyMiddleware")
 
-router.post("/schedule", auth, scheduleInterview);
-router.get("/", auth, getAllInterviews);
-router.get("/:id", auth, getInterviewById);
-router.put("/:id", auth, updateInterview);
-router.delete("/:id", auth, deleteInterview);
+router.post("/schedule", auth,attachCompanyId, scheduleInterview);
+router.get("/", auth,attachCompanyId, getAllInterviews);
+router.get("/:id", auth,attachCompanyId, getInterviewById);
+router.put("/:id", auth,attachCompanyId, updateInterview);
+router.delete("/:id", auth,attachCompanyId, deleteInterview);
 
 module.exports = router;

@@ -2,16 +2,17 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../Middleware/auth");
 const { createEvent, getAllEvents, updateEvent, deleteEvent, gelOneEvent } = require("../Controllers/eventController");
+const attachCompanyContext= require("../Middleware/companyMiddleware")
 
 
-router.post("/create", authMiddleware, createEvent);
+router.post("/create", authMiddleware,attachCompanyContext, createEvent);
 
-router.get("/", getAllEvents);
+router.get("/", authMiddleware,attachCompanyContext, getAllEvents);
 
-router.put("/:id", updateEvent);
+router.put("/:id", authMiddleware,attachCompanyContext, updateEvent);
 
-router.delete("/:id", deleteEvent);
+router.delete("/:id", authMiddleware,attachCompanyContext, deleteEvent);
 
-router.get("/employee/:id",gelOneEvent);
+router.get("/employee/:id", authMiddleware,attachCompanyContext,gelOneEvent);
 
 module.exports = router;

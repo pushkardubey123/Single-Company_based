@@ -8,9 +8,16 @@ exports.uploadDocument = async (req, res) => {
     const { employeeId, documentType } = req.body;
 
     if (!req.files || !req.files.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No file uploaded" });
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    const employee = await User.findOne({
+      _id: employeeId,
+      companyId: req.companyId,
+    });
+
+    if (!employee) {
+      return res.status(404).json({ success: false, message: "Employee not found" });
     }
 
     const file = req.files.file;
@@ -21,10 +28,11 @@ exports.uploadDocument = async (req, res) => {
       fs.mkdirSync(uploadPath, { recursive: true });
     }
 
-    const finalPath = path.join(uploadPath, filename);
-    await file.mv(finalPath);
+    await file.mv(path.join(uploadPath, filename));
 
     const newDoc = new Document({
+      companyId: req.companyId,
+      branchId: employee.branchId,
       employeeId,
       documentType,
       fileUrl: `documents/${filename}`,
@@ -32,21 +40,29 @@ exports.uploadDocument = async (req, res) => {
     });
 
     await newDoc.save();
-    res
-      .status(201)
-      .json({ success: true, message: "Document uploaded", data: newDoc });
+
+    res.status(201).json({
+      success: true,
+      message: "Document uploaded",
+      data: newDoc,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
 exports.getDocuments = async (req, res) => {
   try {
     const { employeeId } = req.params;
 
-    const docs = await Document.find({ employeeId })
-      .populate("uploadedBy", "name role")
-      .populate("employeeId", "name email ")
+    const docs = await Document.find({
+      employeeId,
+      companyId: req.companyId,
+    })
+      .populate("uploadedBy", "name")
+      .populate("employeeId", "name email")
+      .populate("branchId", "name")
       .sort({ uploadedAt: -1 });
 
     res.status(200).json({ success: true, data: docs });
@@ -55,23 +71,27 @@ exports.getDocuments = async (req, res) => {
   }
 };
 
+
 exports.deleteDocument = async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id);
+    const doc = await Document.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
     if (!doc) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Document not found" });
+      return res.status(404).json({ success: false, message: "Document not found" });
     }
 
     deleteFile(doc.fileUrl);
-    await Document.findByIdAndDelete(req.params.id);
+    await doc.deleteOne();
 
     res.status(200).json({ success: true, message: "Document deleted" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 exports.editDocumentType = async (req, res) => {
   try {

@@ -1,11 +1,13 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const userTbl = require("../Modals/User");
-const sendOTP = require("../utils/sendOtp");
-const pendingTbl = require("../Modals/PendingUser");
 const fs = require("fs");
 const path = require("path");
 
+const userTbl = require("../Modals/User");
+const pendingTbl = require("../Modals/PendingUser");
+const sendOTP = require("../utils/sendOtp");
+
+/* ================= REGISTER ================= */
 const register = async (req, res) => {
   try {
     const {
@@ -16,6 +18,7 @@ const register = async (req, res) => {
       gender,
       dob,
       address,
+      companyId,
       departmentId,
       designationId,
       shiftId,
@@ -23,46 +26,58 @@ const register = async (req, res) => {
       emergencyContact,
       pan,
       bankAccount,
-      branchId
+      branchId,
     } = req.body;
+// ✅ FINAL companyId resolution
+let finalCompanyId;
+
+// Admin adding employee (logged-in)
+if (req.user && req.user.role === "admin") {
+  finalCompanyId = req.user.companyId;
+}
+// Public registration
+else {
+  finalCompanyId = companyId;
+}
+
+if (!finalCompanyId) {
+  return res.status(400).json({
+    success: false,
+    message: "Company is required",
+  });
+}
+
+
+    if (!branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch is required",
+      });
+    }
 
     const emailExists =
       (await pendingTbl.findOne({ email })) ||
       (await userTbl.findOne({ email }));
+
     if (emailExists) {
-      return res.json({
+      return res.status(400).json({
         success: false,
-        error: true,
         message: "Email already exists",
-        code: 400,
       });
     }
 
     let profilePic = null;
-    if (req.files && req.files.profilePic) {
-      const img = req.files.profilePic;
 
+    if (req.files?.profilePic) {
+      const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
-      const fs = require("fs");
-      const path = require("path");
+
       if (!fs.existsSync(uploadPath)) {
         fs.mkdirSync(uploadPath, { recursive: true });
       }
 
-      const filename = Date.now() + "_" + img.name;
-      const fullPath = path.join(uploadPath, filename);
-
-      await img.mv(fullPath, (err) => {
-        if (err) {
-          return res.status(500).json({
-            success: false,
-            code: 500,
-            message: "Error during file uploading",
-            error: true,
-          });
-        }
-      });
-
+      const filename = `${Date.now()}_${img.name}`;
+      await img.mv(path.join(uploadPath, filename));
       profilePic = `profiles/${filename}`;
     }
 
@@ -78,287 +93,133 @@ const register = async (req, res) => {
       designationId,
       shiftId,
       doj,
-      emergencyContact: JSON.parse(emergencyContact),
-      profilePic: profilePic || null,
+      emergencyContact: emergencyContact
+        ? JSON.parse(emergencyContact)
+        : null,
+      profilePic,
       pan,
       bankAccount,
-      branchId
+      branchId,
+      companyId:finalCompanyId // ✅ FIX
     });
 
     await pendingUser.save();
 
-    res.json({
+    res.status(201).json({
       success: true,
       message: "Registration pending admin approval",
-      code: 201,
     });
-  } catch {
+  } catch (err) {
+    console.error("REGISTER ERROR:", err);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
-const getPendingUsers = async (req, res) => {
-  try {
-    const users = await pendingTbl
-      .find()
-      .populate("departmentId", "name")
-      .populate("designationId", "name")
-      .populate("shiftId", "name")
-      .populate("branchId", "name");
-
-    res.json({
-      success: true,
-      error: false,
-      message: "Pending users fetched",
-      code: 200,
-      data: users,
-    });
-  } catch {
-    res.status(500).json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
-  }
-};
-
-const approvePendingUser = async (req, res) => {
-  try {
-    const pendingUser = await pendingTbl.findById(req.params.id);
-    const { basicSalary } = req.body;
-    if (!pendingUser) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Pending user not found" });
-    }
-
-    const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
-
-const user = new userTbl({
-  ...pendingUser.toObject(),
-  passwordHash: hashedPassword,
-  role: "employee",
-  basicSalary: basicSalary || 0,
-  branchId: pendingUser.branchId
-});
-
-
-    await user.save();
-    await pendingTbl.findByIdAndDelete(req.params.id);
-
-    res.json({ success: true, message: "User approved and moved to main DB" });
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ success: false, message: "Error approving user" });
-  }
-};
-
-const rejectPendingUser = async (req, res) => {
-  try {
-    const user = await pendingTbl.findById(req.params.id);
-    if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Pending user not found" });
-    }
-
-    if (user.profilePic) {
-      const imagePath = path.join(__dirname, "..", "uploads", user.profilePic);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-      }
-    }
-
-    await pendingTbl.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: "User request rejected" });
-  } catch {
-    res.status(500).json({ success: false, message: "Failed to reject user" });
-  }
-};
-
+/* ================= LOGIN ================= */
 const login = async (req, res) => {
-  
   try {
     const { email, password } = req.body;
+
     const user = await userTbl.findOne({ email });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      return res.json({
+      return res.status(400).json({
         success: false,
-        error: true,
-        message: "password wrong!",
-        code: 400,
+        message: "Invalid credentials",
       });
     }
 
     const token = jwt.sign(
-      { id: user._id, role: user.role },
+      {
+        id: user._id,
+        role: user.role,
+        companyId: user.role === "admin" ? user._id : user.companyId,
+      },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
 
     res.json({
-      success: true,
-      error: false,
-      message: "Login successful",
-      code: 200,
-      token,
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        profilePic: user.profilePic,
-        phone: user.phone,
-        departmentId: user.departmentId,
-        designationId: user.designationId,
-        shiftId: user.shiftId,
-        status: user.status,
-      },
-    });
-  } catch (err) {
-  console.error("Login Error:", err);
-  res.status(500).json({ success: false, message: "Internal Server Error" });
-}
-};
-
-const userForgetPassword = async (req, res) => {
-  const { email } = req.body;
-
-  const user = await userTbl.findOne({ email });
-  if (!user) {
-    return res
-      .status(404)
-      .json({ success: false, message: "Email is not Exist" });
+  success: true,
+  token,
+  data: {
+    id: user._id,        // ✅ explicit id
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    companyId: user.companyId,
+  },
+});
+;
+  } catch {
+    res.status(500).json({ success: false, message: "Login failed" });
   }
-
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  user.otp = otp;
-  user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-  await user.save();
-
-  await sendOTP(email, otp);
-
-  res.json({ success: true, message: "OTP sending successfully !" });
 };
 
-const userVerifyPassword = async (req, res) => {
-  const { email, otp } = req.body;
-
-  const user = await userTbl.findOne({ email });
-
-  if (!user || user.otp !== otp || user.otpExpires < new Date()) {
-    return res
-      .status(400)
-      .json({ success: false, message: "OTP is wrong or OTP is expired !" });
-  }
-
-  res.json({ success: true, message: "OTP is right,Enter New Passsword" });
-};
-
-const userResetPassword = async (req, res) => {
-  const { email, newPassword, otp } = req.body;
-
-  const user = await userTbl.findOne({ email });
-
-  if (!user || user.otp !== otp || user.otpExpires < new Date()) {
-    return res
-      .status(400)
-      .json({ success: false, message: "OTP is wrong or expired !" });
-  }
-
-  user.passwordHash = await bcrypt.hash(newPassword, 10);
-  user.otp = undefined;
-  user.otpExpires = undefined;
-  await user.save();
-
-  res.json({ success: true, message: "Password changed !" });
-};
+/* ================= GET ALL USERS ================= */
 const getAllUsers = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.json({
-      success: false,
-      error: true,
-      message: "Access denied",
-      code: 403,
-    });
-  }
   try {
+    const { branchId } = req.query;
+
+    const filter = {
+      role: "employee",
+      companyId: req.companyId,
+    };
+
+    if (branchId) filter.branchId = branchId; // ✅ NEW
+
     const users = await userTbl
-      .find({ role: "employee" })
+      .find(filter)
       .select("-passwordHash")
       .populate("departmentId", "name")
       .populate("designationId", "name")
       .populate("shiftId", "name")
       .populate("branchId", "name");
 
-    res.json({
-      success: true,
-      error: false,
-      message: "Users fetched",
-      code: 200,
-      data: users,
-    });
-  } catch (err) {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.json({ success: true, data: users });
+  } catch {
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
+/* ================= GET USER BY ID ================= */
 const getUserById = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.json({
-      success: false,
-      error: true,
-      message: "Access denied",
-      code: 403,
-    });
-  }
   try {
     const user = await userTbl
-      .findById(req.params.id)
+      .findOne({
+        _id: req.params.id,
+        companyId: req.companyId,
+      })
       .select("-passwordHash")
       .populate("departmentId", "name")
       .populate("designationId", "name")
-      .populate("shiftId", "name");
+      .populate("shiftId", "name")
+      .populate("branchId", "name");
+
     if (!user) {
-      return res.json({
-        success: false,
-        error: true,
-        message: "Not found",
-        code: 404,
-      });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
-    res.json({
-      success: true,
-      error: false,
-      message: "User found",
-      code: 200,
-      data: user,
-    });
+
+    res.json({ success: true, data: user });
   } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
 
+/* ================= UPDATE USER ================= */
 const updateUser = async (req, res) => {
   try {
-    const emp = await userTbl.findById(req.params.id);
-    if (!emp) return res.status(404).json({ message: "User not found" });
+    const emp = await userTbl.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
+    if (!emp) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
     let profilePic = emp.profilePic;
 
-   
-    if (req.files && req.files.profilePic) {
+    if (req.files?.profilePic) {
       const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
 
@@ -367,135 +228,222 @@ const updateUser = async (req, res) => {
       }
 
       if (profilePic) {
-        const oldImage = path.join("uploads", profilePic);
-        if (fs.existsSync(oldImage)) fs.unlinkSync(oldImage);
+        const oldImg = path.join("uploads", profilePic);
+        if (fs.existsSync(oldImg)) fs.unlinkSync(oldImg);
       }
 
-      const filename = Date.now() + "_" + img.name;
-      const fullPath = path.join(uploadPath, filename);
-
-      await img.mv(fullPath);
-
+      const filename = `${Date.now()}_${img.name}`;
+      await img.mv(path.join(uploadPath, filename));
       profilePic = `profiles/${filename}`;
     }
 
     await userTbl.findByIdAndUpdate(req.params.id, {
       ...req.body,
-      profilePic
+      profilePic,
     });
 
-    res.json({ success: true, message: "Employee updated successfully" });
-  } catch (err) {
-    console.error(err);
+    res.json({ success: true, message: "User updated successfully" });
+  } catch {
     res.status(500).json({ success: false, message: "Update failed" });
   }
 };
 
-
+/* ================= DELETE USER ================= */
 const deleteUser = async (req, res) => {
-  if (req.user.role !== "admin") {
-    return res.json({
-      success: false,
-      error: true,
-      message: "Access denied",
-      code: 403,
-    });
-  }
-
   try {
-    const user = await userTbl.findById(req.params.id);
+    const user = await userTbl.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
     if (!user) {
-      return res.json({
-        success: false,
-        error: true,
-        message: "User not found",
-        code: 404,
-      });
+      return res.status(404).json({ success: false, message: "User not found" });
     }
 
     if (user.profilePic) {
-      const imagePath = path.join(__dirname, "..", "uploads", user.profilePic);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
-      }
+      const imgPath = path.join("uploads", user.profilePic);
+      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
     }
 
     await userTbl.findByIdAndDelete(req.params.id);
 
-    res.json({ success: true, error: false, message: "Deleted", code: 200 });
+    res.json({ success: true, message: "Deleted successfully" });
   } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false, message: "Delete failed" });
   }
 };
 
+/* ================= GET PENDING USERS ================= */
+const getPendingUsers = async (req, res) => {
+  try {
+    const { branchId } = req.query;
+
+    const filter = { companyId: req.companyId };
+    if (branchId) filter.branchId = branchId;
+
+    const users = await pendingTbl
+      .find(filter)
+      .populate("departmentId", "name")
+      .populate("designationId", "name")
+      .populate("shiftId", "name")
+      .populate("branchId", "name");
+
+    res.json({ success: true, data: users });
+  } catch {
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+/* ================= APPROVE PENDING USER ================= */
+const approvePendingUser = async (req, res) => {
+  try {
+    const { basicSalary } = req.body;
+
+    if (!basicSalary) {
+      return res.status(400).json({
+        success: false,
+        message: "Basic salary is required",
+      });
+    }
+
+    const pendingUser = await pendingTbl.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
+    if (!pendingUser) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
+
+    const user = new userTbl({
+      ...pendingUser.toObject(),
+      passwordHash: hashedPassword,
+      role: "employee",
+      companyId: req.companyId,
+      basicSalary, // ✅ yahin add
+    });
+
+    await user.save();
+    await pendingTbl.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: "User approved with salary" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Approval failed" });
+  }
+};
+
+
+/* ================= REJECT PENDING USER ================= */
+const rejectPendingUser = async (req, res) => {
+  try {
+    await pendingTbl.findOneAndDelete({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
+    res.json({ success: true, message: "User rejected" });
+  } catch {
+    res.status(500).json({ success: false, message: "Reject failed" });
+  }
+};
+
+/* ================= BIRTHDAYS & ANNIVERSARIES ================= */
 const getBirthdaysAndAnniversaries = async (req, res) => {
   try {
-    const users = await userTbl.find({ role: "employee", status: "active" });
+    const users = await userTbl.find({
+      role: "employee",
+      companyId: req.companyId,
+      status: "active",
+    });
 
     const today = new Date();
-    const todayMonthDay = `${today.getMonth() + 1}-${today.getDate()}`;
+    const md = `${today.getMonth() + 1}-${today.getDate()}`;
 
     const birthdays = [];
     const anniversaries = [];
 
-    users.forEach((user) => {
-      const dob = new Date(user.dob);
-      const doj = new Date(user.doj);
-
-      const dobMonthDay = `${dob.getMonth() + 1}-${dob.getDate()}`;
-      const dojMonthDay = `${doj.getMonth() + 1}-${doj.getDate()}`;
-
-      if (dobMonthDay === todayMonthDay) {
-        birthdays.push(user);
-      }
-      if (dojMonthDay === todayMonthDay) {
-        anniversaries.push(user);
-      }
+    users.forEach((u) => {
+      if (u.dob && `${u.dob.getMonth() + 1}-${u.dob.getDate()}` === md)
+        birthdays.push(u);
+      if (u.doj && `${u.doj.getMonth() + 1}-${u.doj.getDate()}` === md)
+        anniversaries.push(u);
     });
 
-    res.json({
-      success: true,
-      message: "Birthdays and anniversaries fetched",
-      code: 200,
-      data: {
-        birthdays,
-        anniversaries,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      code: 500,
-    });
+    res.json({ success: true, data: { birthdays, anniversaries } });
+  } catch {
+    res.status(500).json({ success: false, message: "Error fetching dates" });
   }
 };
 
+/* ================= ALL EMPLOYEE DATES ================= */
 const getAllEmployeeDates = async (req, res) => {
   try {
-    const employees = await userTbl.find({ role: "employee" }, "name dob doj");
+    const data = await userTbl
+      .find(
+        { role: "employee", companyId: req.companyId },
+        "name dob doj branchId"
+      )
+      .populate("branchId", "name"); // 👈 branch ka naam
 
-    res.json({
-      success: true,
-      message: "Employee DOB and DOJ list fetched",
-      code: 200,
-      data: employees,
-    });
+    res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: "Failed to fetch employee DOB and DOJ",
-      code: 500,
-      error: true,
+      message: "Fetch failed",
+      error: error.message,
     });
   }
 };
 
+
+/* ================= FORGOT / VERIFY / RESET PASSWORD ================= */
+const userForgetPassword = async (req, res) => {
+  const { email } = req.body;
+
+  const user = await userTbl.findOne({ email });
+  if (!user)
+    return res.status(404).json({ success: false, message: "Email not found" });
+
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  user.otp = otp;
+  user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+
+  await user.save();
+  await sendOTP(email, otp);
+
+  res.json({ success: true, message: "OTP sent" });
+};
+
+const userVerifyPassword = async (req, res) => {
+  const { email, otp } = req.body;
+  const user = await userTbl.findOne({ email });
+
+  if (!user || user.otp !== otp || user.otpExpires < new Date()) {
+    return res.status(400).json({ success: false, message: "Invalid OTP" });
+  }
+
+  res.json({ success: true, message: "OTP verified" });
+};
+
+const userResetPassword = async (req, res) => {
+  const { email, newPassword, otp } = req.body;
+  const user = await userTbl.findOne({ email });
+
+  if (!user || user.otp !== otp || user.otpExpires < new Date()) {
+    return res.status(400).json({ success: false, message: "Invalid OTP" });
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, 10);
+  user.otp = undefined;
+  user.otpExpires = undefined;
+  await user.save();
+
+  res.json({ success: true, message: "Password reset successful" });
+};
+
+/* ================= EXPORT ================= */
 module.exports = {
   register,
   login,

@@ -2,24 +2,35 @@ const Project = require("../Modals/Project");
 
 exports.createProject = async (req, res) => {
   try {
-    const project = await Project.create(req.body);
-    res
-      .status(201)
-      .json({ success: true, message: "Project created", data: project });
+    const project = await Project.create({
+      ...req.body,
+      companyId: req.companyId,       // ✅ AUTO
+      branchId: req.user.branchId,    // ✅ AUTO (attendance style)
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Project created",
+      data: project,
+    });
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error creating project",
-        error: err.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error creating project",
+      error: err.message,
+    });
   }
 };
 
+
 exports.getAllProjects = async (req, res) => {
   try {
-    const projects = await Project.find()
+    const filter = {
+      companyId: req.companyId, // 🔐 attendance style
+      ...(req.user.branchId && { branchId: req.user.branchId }),
+    };
+
+    const projects = await Project.find(filter)
       .populate("assignedEmployees", "name email")
       .populate("tasks.assignedTo", "name email")
       .populate("tasks.comments.commentedBy", "name")
@@ -27,15 +38,14 @@ exports.getAllProjects = async (req, res) => {
 
     res.json({ success: true, data: projects });
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error fetching projects",
-        error: err.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error fetching projects",
+      error: err.message,
+    });
   }
 };
+
 
 exports.addTaskToProject = async (req, res) => {
   const { id } = req.params;
@@ -80,34 +90,41 @@ exports.addTaskToProject = async (req, res) => {
 
 exports.getProjectById = async (req, res) => {
   try {
-    const project = await Project.findById(req.params.id)
+    const project = await Project.findOne({
+      _id: req.params.id,
+      companyId: req.companyId, // 🔐
+      ...(req.user.branchId && { branchId: req.user.branchId }),
+    })
       .populate("assignedEmployees", "name email")
       .populate("tasks.assignedTo", "name email")
       .populate("tasks.comments.commentedBy", "name")
       .populate("tasks.timeLogs.employeeId", "name");
 
-    if (!project)
-      return res
-        .status(404)
-        .json({ success: false, message: "Project not found" });
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: "Project not found",
+      });
+    }
 
     res.json({ success: true, data: project });
   } catch (err) {
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Error fetching project",
-        error: err.message,
-      });
+    res.status(500).json({
+      success: false,
+      message: "Error fetching project",
+      error: err.message,
+    });
   }
 };
 
+
 exports.updateProject = async (req, res) => {
   try {
-    const project = await Project.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-    });
+const project = await Project.findOneAndUpdate(
+  { _id: req.params.id, companyId: req.companyId },
+  req.body,
+  { new: true }
+);
     res.json({ success: true, message: "Project updated", data: project });
   } catch (err) {
     res
@@ -122,7 +139,11 @@ exports.updateProject = async (req, res) => {
 
 exports.deleteProject = async (req, res) => {
   try {
-    await Project.findByIdAndDelete(req.params.id);
+   await Project.findOneAndDelete({
+  _id: req.params.id,
+  companyId: req.companyId,
+});
+
     res.json({ success: true, message: "Project deleted" });
   } catch (err) {
     res

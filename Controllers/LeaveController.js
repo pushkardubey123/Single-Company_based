@@ -8,38 +8,42 @@ const getLeaveReport = async (req, res) => {
     let start, end;
     if (type === "Monthly") {
       if (!month) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Month is required for monthly report",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Month is required for monthly report",
+        });
       }
       start = moment(month, "YYYY-MM").startOf("month").toDate();
       end = moment(month, "YYYY-MM").endOf("month").toDate();
     } else if (type === "Yearly") {
       if (!year) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Year is required for yearly report",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Year is required for yearly report",
+        });
       }
       start = moment(year, "YYYY").startOf("year").toDate();
       end = moment(year, "YYYY").endOf("year").toDate();
     } else {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Invalid type. Must be Monthly or Yearly",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid type. Must be Monthly or Yearly",
+      });
     }
 
-    const leaves = await leaveTbl
-      .find({ startDate: { $gte: start, $lte: end } })
-      .populate("employeeId", "name email");
+    const filter = {
+  companyId: req.companyId,
+  startDate: { $gte: start, $lte: end },
+};
+
+if (req.user.branchId) {
+  filter.branchId = req.user.branchId;
+}
+
+const leaves = await leaveTbl
+  .find(filter)
+  .populate("employeeId", "name email");
+
 
     res.json({
       success: true,
@@ -51,177 +55,143 @@ const getLeaveReport = async (req, res) => {
   }
 };
 
-module.exports = {
-  getLeaveReport,
-};
-
 const createLeave = async (req, res) => {
   try {
-    const leave = new leaveTbl(req.body);
-    const result = await leave.save();
+    console.log("USER:", req.user);
+    console.log("COMPANY:", req.companyId);
+    console.log("BRANCH:", req.branchId);
 
-    if (result) {
-      res.json({
-        success: true,
-        error: false,
-        message: "Leave applied successfully",
-        code: 201,
-        data: result,
-      });
-    } else {
-      res.json({
-        success: false,
-        error: true,
-        message: "Leave application failed",
-        code: 400,
-      });
-    }
-  } catch {
-    s.json({
+    const leave = await leaveTbl.create({
+      employeeId: req.user._id,      
+      companyId: req.companyId,
+      branchId: req.branchId,
+      leaveType: req.body.leaveType,
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      reason: req.body.reason,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Leave applied successfully",
+      data: leave,
+    });
+  } catch (err) {
+    console.error("CREATE LEAVE ERROR:", err); // 🔥 MUST
+    res.status(500).json({
       success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
+      message: err.message,
     });
   }
 };
 
+
 const getAllLeaves = async (req, res) => {
   try {
-    const data = await leaveTbl.find().populate("employeeId", "name email");
+    const filter = {
+  companyId: req.companyId,
+};
+
+if (req.user.role !== "admin") {
+  filter.branchId = req.user.branchId;
+}
+
+const data = await leaveTbl
+  .find(filter)
+  .populate("employeeId", "name email");
+
+
     res.json({
       success: true,
-      error: false,
-      message: "Leaves fetched successfully",
-      code: 200,
       data,
     });
   } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false });
   }
 };
 
 const getLeavesByEmployee = async (req, res) => {
   try {
-    const employeeId = req.params.id;
-
-    const leaves = await leaveTbl.find({ employeeId }).sort({ createdAt: -1 });
+    const leaves = await leaveTbl
+      .find({
+        employeeId: req.params.id,
+        companyId: req.companyId,
+        branchId: req.user.branchId,
+      })
+      .sort({ createdAt: -1 });
 
     res.json({
       success: true,
-      error: false,
-      message: "Employee leaves fetched successfully",
-      code: 200,
       data: leaves,
     });
   } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false });
   }
 };
 
 const getLeaveById = async (req, res) => {
   try {
     const data = await leaveTbl
-      .findById(req.params.id)
+      .findOne({
+        _id: req.params.id,
+        companyId: req.companyId,
+        branchId: req.user.branchId,
+      })
       .populate("employeeId", "name email");
 
     if (!data) {
-      return res.json({
-        success: false,
-        error: true,
-        message: "Leave not found",
-        code: 404,
-      });
+      return res.status(404).json({ success: false });
     }
 
-    res.json({
-      success: true,
-      error: false,
-      message: "Leave fetched successfully",
-      code: 200,
-      data,
-    });
+    res.json({ success: true, data });
   } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false });
   }
 };
 
 const updateLeaveStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-    const updated = await leaveTbl.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true }
-    );
+const filter = {
+  _id: req.params.id,
+  companyId: req.companyId,
+};
+
+if (req.user.role !== "admin") {
+  filter.branchId = req.user.branchId;
+}
+
+const updated = await leaveTbl.findOneAndUpdate(
+  filter,
+  { status: req.body.status },
+  { new: true }
+);
+
 
     if (!updated) {
-      return res.json({
-        success: false,
-        error: true,
-        message: "Leave not found",
-        code: 404,
-      });
+      return res.status(404).json({ success: false });
     }
 
-    res.json({
-      success: true,
-      error: false,
-      message: "Leave status updated successfully",
-      code: 200,
-      data: updated,
-    });
+    res.json({ success: true, data: updated });
   } catch {
-    s.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false });
   }
 };
 
 const deleteLeave = async (req, res) => {
   try {
-    const deleted = await leaveTbl.findByIdAndDelete(req.params.id);
+    const deleted = await leaveTbl.findOneAndDelete({
+      _id: req.params.id,
+      companyId: req.companyId,
+      branchId: req.user.branchId,
+    });
 
     if (!deleted) {
-      return res.json({
-        success: false,
-        error: true,
-        message: "Leave not found",
-        code: 404,
-      });
+      return res.status(404).json({ success: false });
     }
 
-    res.json({
-      success: true,
-      error: false,
-      message: "Leave deleted successfully",
-      code: 200,
-    });
+    res.json({ success: true });
   } catch {
-    s.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    res.status(500).json({ success: false });
   }
 };
 

@@ -2,28 +2,48 @@ const mongoose = require("mongoose");
 
 const ExitRequestSchema = new mongoose.Schema(
   {
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", // admin/company
+      required: true,
+      index: true,
+    },
+
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
     employeeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
+
     reason: {
       type: String,
       required: true,
     },
+
     resignationDate: {
       type: Date,
       required: true,
     },
+
     interviewFeedback: {
       type: String,
       default: "",
     },
+
     clearanceStatus: {
       type: String,
       enum: ["pending", "cleared", "on-hold"],
       default: "pending",
     },
+
     finalSettlement: {
       amount: {
         type: Number,

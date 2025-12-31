@@ -30,18 +30,42 @@ const TaskSchema = new mongoose.Schema({
   timeLogs: [TimeLogSchema],
 });
 
-const ProjectSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  description: String,
-  startDate: Date,
-  endDate: Date,
-  status: {
-    type: String,
-    enum: ["not-started", "in-progress", "completed"],
-    default: "not-started",
+const ProjectSchema = new mongoose.Schema(
+  {
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", // admin/company
+      required: true,
+      index: true,
+    },
+
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      index: true,
+    },
+
+    name: { type: String, required: true },
+    description: String,
+    startDate: Date,
+    endDate: Date,
+
+    status: {
+      type: String,
+      enum: ["not-started", "in-progress", "completed"],
+      default: "not-started",
+    },
+
+    assignedEmployees: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    ],
+
+    tasks: [TaskSchema],
   },
-  assignedEmployees: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-  tasks: [TaskSchema],
-});
+  { timestamps: true }
+);
+
+module.exports = mongoose.model("Project", ProjectSchema);
+
 
 module.exports = mongoose.model("Project", ProjectSchema);

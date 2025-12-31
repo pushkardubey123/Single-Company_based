@@ -2,133 +2,155 @@ const Department = require("../Modals/Department");
 
 const addDepartment = async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, branchId } = req.body;
+    const companyId = req.companyId;
 
-    const existing = await Department.findOne({ name });
+    if (!companyId || !branchId) {
+      return res.status(400).json({
+        success: false,
+        message: "CompanyId or BranchId missing",
+      });
+    }
+
+    const existing = await Department.findOne({
+      name,
+      companyId,
+      branchId,
+    });
+
     if (existing) {
-      return res.json({
+      return res.status(400).json({
         success: false,
-        error: true,
-        message: "Department already exists",
-        code: 400,
+        message: "Department already exists in this branch",
       });
     }
 
-    const department = new Department({ name, description });
-    const result = await department.save();
+    const department = await Department.create({
+      name,
+      description,
+      companyId,
+      branchId,
+    });
 
-    if (result) {
-      res.json({
-        success: true,
-        error: false,
-        message: "Department created successfully",
-        code: 201,
-        data: result,
-      });
-    } else {
-      res.json({
-        success: false,
-        error: true,
-        message: "Department creation failed",
-        code: 400,
-      });
-    }
-  } catch {
-    res.json({
+    res.status(201).json({
+      success: true,
+      message: "Department created successfully",
+      data: department,
+    });
+  } catch (err) {
+    console.error("ADD DEPARTMENT ERROR:", err);
+    res.status(500).json({
       success: false,
-      error: true,
       message: "Internal Server Error",
-      code: 500,
     });
   }
 };
 
 const getDepartments = async (req, res) => {
   try {
-    const data = await Department.find();
-    res.json({
-      success: true,
-      error: false,
-      message: "Departments fetched successfully",
-      code: 200,
-      data,
-    });
-  } catch {
-    res.json({
-      success: false,
-      error: true,
-      message: "Internal Server Error",
-      code: 500,
-    });
+    const { branchId } = req.query;
+
+    const filter = {
+      companyId: req.companyId, // 🔥 FIX
+    };
+
+    if (branchId) filter.branchId = branchId;
+
+    const data = await Department.find(filter)
+      .populate("branchId", "name")
+      .select("name description branchId")
+      .sort({ name: 1 });
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
+const getPublicDepartments = async (req, res) => {
+  try {
+    const { branchId } = req.query;
+
+    const filter = {};
+    if (branchId) filter.branchId = branchId;
+
+    const data = await Department.find(filter)
+      .select("_id name branchId");
+
+    res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+
+
 const updateDepartment = async (req, res) => {
   try {
-    const { name, description } = req.body;
-    const updated = await Department.findByIdAndUpdate(
-      req.params.id,
-      { name, description },
+    const { name, description, branchId } = req.body;
+    const companyId = req.companyId;
+
+    const updated = await Department.findOneAndUpdate(
+      { _id: req.params.id, companyId },
+      { name, description, branchId },
       { new: true }
     );
 
     if (!updated) {
-      return res.json({
+      return res.status(404).json({
         success: false,
-        error: true,
         message: "Department not found",
-        code: 404,
       });
     }
 
     res.json({
       success: true,
-      error: false,
       message: "Department updated successfully",
-      code: 200,
       data: updated,
     });
   } catch {
-    res.json({
+    res.status(500).json({
       success: false,
-      error: true,
       message: "Internal Server Error",
-      code: 500,
     });
   }
 };
 
 const deleteDepartment = async (req, res) => {
   try {
-    const deleted = await Department.findByIdAndDelete(req.params.id);
+    const companyId = req.companyId;
+
+    const deleted = await Department.findOneAndDelete({
+      _id: req.params.id,
+      companyId,
+    });
+
     if (!deleted) {
-      return res.json({
+      return res.status(404).json({
         success: false,
-        error: true,
         message: "Department not found",
-        code: 404,
       });
     }
 
     res.json({
       success: true,
-      error: false,
       message: "Department deleted successfully",
-      code: 200,
     });
   } catch {
-    res.json({
+    res.status(500).json({
       success: false,
-      error: true,
       message: "Internal Server Error",
-      code: 500,
     });
   }
 };
+
+
 
 module.exports = {
   addDepartment,
   deleteDepartment,
   updateDepartment,
   getDepartments,
+  getPublicDepartments
 };

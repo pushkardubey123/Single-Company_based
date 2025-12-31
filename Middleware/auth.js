@@ -2,47 +2,36 @@ const jwt = require("jsonwebtoken");
 const User = require("../Modals/User");
 
 const authMiddleware = async (req, res, next) => {
-  const rawHeader = req.header("Authorization");
-  const token = rawHeader?.split(" ")[1];
-
-  if (!token) {
-    return res.status(401).json({
-      success: false,
-      error: true,
-      message: "Access denied. Token missing.",
-      code: 401,
-    });
-  }
-
   try {
+    const rawHeader = req.header("Authorization");
+    const token = rawHeader?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Token missing" });
+    }
+
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select("name email role");
+    const user = await User.findById(decoded.id).select(
+      "name email role companyId branchId"
+    );
 
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: true,
-        message: "Invalid token. User not found.",
-        code: 401,
-      });
+      return res.status(401).json({ success: false, message: "User not found" });
     }
 
     req.user = {
-      id: user._id,
+      _id: user._id,          
       name: user.name,
       email: user.email,
       role: user.role,
+      companyId: user.companyId,
+      branchId: user.branchId, 
     };
 
     next();
-  } catch {
-    res.status(401).json({
-      success: false,
-      error: true,
-      message: "Invalid token",
-      code: 401,
-    });
+  } catch (err) {
+    return res.status(401).json({ success: false, message: "Invalid token" });
   }
 };
 

@@ -10,19 +10,56 @@ const {
   getLeaveReport,
 } = require("../Controllers/LeaveController");
 const authMiddleware = require("../Middleware/auth");
+const attachCompanyContext = require("../Middleware/companyMiddleware");
 
-router.post("/", createLeave);
+router.post(
+  "/",
+  authMiddleware,
+  attachCompanyContext,
+  createLeave
+);
 
-router.get("/", getAllLeaves);
+router.get(
+  "/",
+  authMiddleware,
+  attachCompanyContext,
+  getAllLeaves
+);
 
-router.get("/employee/:id", authMiddleware, getLeavesByEmployee);
+router.get(
+  "/employee/:id",
+  authMiddleware,
+  attachCompanyContext,
+  getLeavesByEmployee
+);
 
-router.get("/report", authMiddleware, getLeaveReport);
+router.get(
+  "/report",
+  authMiddleware,
+  attachCompanyContext,
+  getLeaveReport
+);
 
-router.get("/:id", getLeaveById);
+router.get(
+  "/:id",
+  authMiddleware,
+  attachCompanyContext,
+  getLeaveById
+);
 
-router.put("/:id", updateLeaveStatus);
+router.put(
+  "/:id",
+  authMiddleware,
+  attachCompanyContext,
+  updateLeaveStatus
+);
 
-router.delete("/:id", deleteLeave);
+router.delete(
+  "/:id",
+  authMiddleware,
+  attachCompanyContext,
+  deleteLeave
+);
+
 
 module.exports = router;

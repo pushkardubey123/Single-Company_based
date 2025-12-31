@@ -8,12 +8,17 @@ const {
   updateWFHStatus,
   adminAssignWFH,
 } = require("../Controllers/workFromHomeController");
+const attachCompanyId = require("../Middleware/companyMiddleware")
 
-router.post("/wfh/apply", auth, applyWFH);
-router.get("/wfh/my", auth, getMyWFH);
+router.post("/wfh/apply", auth, attachCompanyId, applyWFH);
 
-router.get("/wfh/all", auth, getAllWFH);
-router.put("/wfh/status/:id", auth, updateWFHStatus);
-router.post("/admin/assign-wfh", auth, adminAssignWFH);
+router.get("/wfh/my", auth, attachCompanyId, getMyWFH);
+
+router.get("/wfh/all", auth, attachCompanyId, getAllWFH);
+
+router.put("/wfh/status/:id", auth, attachCompanyId, updateWFHStatus);
+
+router.post("/admin/assign-wfh", auth, attachCompanyId, adminAssignWFH);
+
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const shiftSchema = new mongoose.Schema(
+const OfficeTimingSchema = new mongoose.Schema(
   {
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -12,11 +12,16 @@ const shiftSchema = new mongoose.Schema(
       ref: "Branch",
       required: true,
     },
-    name: { type: String, required: true },
-    startTime: { type: String, required: true },
-    endTime: { type: String, required: true },
+    officeStart: {
+      type: String, // "10:00"
+      required: true,
+    },
+    officeEnd: {
+      type: String, // "18:00"
+      required: true,
+    },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Shift", shiftSchema);
+module.exports = mongoose.model("OfficeTiming", OfficeTimingSchema);

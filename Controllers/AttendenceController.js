@@ -3,6 +3,8 @@ const { getDistance } = require("geolib");
 const moment = require("moment-timezone"); 
 const verifyFacePython = require("../utils/faceVerify.py-api");
 const userTbl = require("../Modals/User");
+const Branch = require("../Modals/Branch");
+
 
 const fs = require("fs");
 const path = require("path");
@@ -20,10 +22,37 @@ if (!fs.existsSync(PROFILE_DIR)) {
 }
 
 
+// fallback office location (agar employee ka branch nahi mila to)
 const officeLocation = {
-  latitude: 26.88925,
-  longitude: 80.99116,
+  latitude: 22.88925,
+  longitude: 86.99116,
 };
+
+const getBranchLocation = async (branchId) => {
+  if (!branchId) return null;
+  try {
+    const branch = await Branch.findById(branchId);
+    if (!branch) return null;
+    return {
+      latitude: branch.latitude,
+      longitude: branch.longitude,
+      radius: branch.radius || 100, // meter
+    };
+  } catch (err) {
+    console.error("Error fetching branch:", err);
+    return null;
+  }
+};
+
+const isWithinBranchRange = (userLat, userLon, branchLat, branchLon, branchRadius) => {
+  if (!userLat || !userLon || !branchLat || !branchLon) return false;
+  const distance = getDistance(
+    { latitude: Number(userLat), longitude: Number(userLon) },
+    { latitude: Number(branchLat), longitude: Number(branchLon) }
+  );
+  return distance <= (branchRadius || 100);
+};
+
 
 const getISTDate = () => {
   return moment.tz(new Date(), "Asia/Kolkata").toDate();
@@ -41,9 +70,22 @@ const isWithinOfficeRange = (lat, lon) => {
 
 const markAttendance = async (req, res) => {
   try {
-    const { employeeId, latitude, longitude, liveImage } = req.body;
+    const { latitude, longitude, liveImage } = req.body;
+const employeeId = req.user.id;
 
-    if (!employeeId || !latitude || !longitude || !liveImage) {
+console.log("ATTENDANCE PAYLOAD", {
+  employeeId,
+  latitude,
+  longitude,
+  hasImage: !!liveImage
+});
+    if (
+  !employeeId ||
+  typeof latitude !== "number" ||
+  typeof longitude !== "number" ||
+  !liveImage
+) {
+
       return res.status(400).json({ success: false, message: "Missing required fields" });
     }
 
@@ -71,9 +113,26 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    if (!isWithinOfficeRange(latitude, longitude)) {
-      return res.status(403).json({ success: false, message: "You are outside office range" });
+    let branchInfo = null;
+    if (employee.branchId) {
+      branchInfo = await getBranchLocation(employee.branchId);
     }
+
+    let allowedLat = officeLocation.latitude;
+    let allowedLon = officeLocation.longitude;
+    let allowedRadius = 200; 
+
+    if (branchInfo) {
+      allowedLat = branchInfo.latitude;
+      allowedLon = branchInfo.longitude;
+      allowedRadius = branchInfo.radius || allowedRadius;
+    }
+
+    const inside = isWithinBranchRange(latitude, longitude, allowedLat, allowedLon, allowedRadius);
+    if (!inside) {
+      return res.status(403).json({ success: false, message: "You are outside your branch location" });
+    }
+    // --- END NEW ---
 
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
@@ -94,15 +153,17 @@ const markAttendance = async (req, res) => {
     const hour = parseInt(moment.tz("Asia/Kolkata").format("HH"));
     const status = hour > 10 ? "Late" : "Present";
 
-    const attendance = new attendanceTbl({
-      employeeId,
-      date: getISTDate(),
-      inTime,
-      location: { latitude, longitude },
-      status,
-      statusType: "Auto",
-      inOutLogs: [{ inTime, outTime: null }],
-    });
+const attendance = new attendanceTbl({
+  employeeId: employee._id,
+  companyId: employee.companyId,   // ✅ AUTO
+  branchId: employee.branchId,     // ✅ AUTO
+  date: getISTDate(),
+  inTime,
+  location: { latitude, longitude },
+  status,
+  statusType: "Auto",
+  inOutLogs: [{ inTime, outTime: null }],
+});
 
     const result = await attendance.save();
 
@@ -119,19 +180,47 @@ const markAttendance = async (req, res) => {
 };
 
 
-
 const markSession = async (req, res) => {
   try {
-    const { employeeId, latitude, longitude, actionType } = req.body;
+    const { latitude, longitude, actionType } = req.body;
+const employeeId = req.user.id;
 
-    if (!employeeId || !latitude || !longitude || !actionType) {
+
+ if (
+  !employeeId ||
+  typeof latitude !== "number" ||
+  typeof longitude !== "number" ||
+  !actionType
+) {
+
       return res.status(400).json({ success: false, message: "Missing fields" });
+      
     }
 
-    if (!isWithinOfficeRange(latitude, longitude)) {
+    const employee = await userTbl.findById(employeeId);
+    if (!employee) {
+      return res.status(404).json({ success: false, message: "Employee not found" });
+    }
+
+    // fetch branch or fallback
+    let branchInfo = null;
+    if (employee.branchId) branchInfo = await getBranchLocation(employee.branchId);
+
+    let allowedLat = officeLocation.latitude;
+    let allowedLon = officeLocation.longitude;
+    let allowedRadius = 200;
+
+    if (branchInfo) {
+      allowedLat = branchInfo.latitude;
+      allowedLon = branchInfo.longitude;
+      allowedRadius = branchInfo.radius || allowedRadius;
+    }
+
+    const inside = isWithinBranchRange(latitude, longitude, allowedLat, allowedLon, allowedRadius);
+    if (!inside) {
       return res.status(403).json({
         success: false,
-        message: "You are outside the allowed office location",
+        message: "You are outside the allowed branch location",
       });
     }
 
@@ -145,15 +234,18 @@ const markSession = async (req, res) => {
     });
 
     if (!attendance && actionType === "in") {
-      attendance = new attendanceTbl({
-        employeeId,
-        date: getISTDate(),
-        inTime: currentTime,
-        location: { latitude, longitude },
-        status: "Present",
-        statusType: "Auto",
-        inOutLogs: [{ inTime: currentTime, outTime: null }],
-      });
+attendance = new attendanceTbl({
+  employeeId: employee._id,
+  companyId: employee.companyId,
+  branchId: employee.branchId,
+  date: getISTDate(),
+  inTime: currentTime,
+  location: { latitude, longitude },
+  status: "Present",
+  statusType: "Auto",
+  inOutLogs: [{ inTime: currentTime, outTime: null }],
+});
+
     } else if (attendance) {
       const last = attendance.inOutLogs[attendance.inOutLogs.length - 1];
       if (actionType === "in") {
@@ -183,6 +275,7 @@ const markSession = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
 const getMonthlyAttendance = async (req, res) => {
   try {
     const { month } = req.query;
@@ -208,23 +301,29 @@ const getMonthlyAttendance = async (req, res) => {
 const getAllAttendance = async (req, res) => {
   try {
     const all = await attendanceTbl
-      .find()
+      .find({ companyId: req.companyId })   // ✅ IMPORTANT
       .populate("employeeId", "name email")
+      .populate("branchId", "name latitude longitude radius")
       .sort({ date: -1 });
 
     const grouped = {};
-
     all.forEach((record) => {
       const dateKey = new Date(record.date).toDateString();
       if (!grouped[dateKey]) grouped[dateKey] = [];
       grouped[dateKey].push(record);
     });
 
-    res.status(200).json({ success: true, message: "Grouped attendance fetched", data: grouped });
+    res.status(200).json({
+      success: true,
+      data: grouped,
+    });
   } catch (err) {
+    console.error("GET ATTENDANCE ERROR:", err);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
+
 
 const getAttendanceByEmployee = async (req, res) => {
   try {
@@ -288,14 +387,19 @@ const bulkMarkAttendance = async (req, res) => {
       });
 
       if (!exists) {
-        const newAtt = new attendanceTbl({
-          employeeId: empId,
-          date,
-          inTime: "09:00",
-          status: "Present",
-          statusType: "Manual",
-          inOutLogs: [{ inTime: "09:00", outTime: null }],
-        });
+       const emp = await userTbl.findById(empId).select("companyId branchId");
+
+const newAtt = new attendanceTbl({
+  employeeId: empId,
+  companyId: emp.companyId,
+  branchId: emp.branchId,
+  date,
+  inTime: "09:00",
+  status: "Present",
+  statusType: "Manual",
+  inOutLogs: [{ inTime: "09:00", outTime: null }],
+});
+
         await newAtt.save();
         newAttendances.push(newAtt);
       }

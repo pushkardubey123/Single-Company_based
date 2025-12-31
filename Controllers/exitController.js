@@ -1,88 +1,122 @@
 const ExitRequest = require("../Modals/ExitRequest");
 
+/* =========================
+   EMPLOYEE → CREATE
+========================= */
 const createExitRequest = async (req, res) => {
   try {
     const { reason, resignationDate } = req.body;
-    const employeeId = req.user.id;
 
-    const newRequest = new ExitRequest({
-      employeeId,
+    const exit = await ExitRequest.create({
+      companyId: req.companyId,
+      branchId: req.branchId || null,
+      employeeId: req.user._id,
       reason,
       resignationDate,
     });
 
-    await newRequest.save();
     res.json({
       success: true,
       message: "Exit request submitted",
-      data: newRequest,
+      data: exit,
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error("Exit submit error:", err);
+    res.status(500).json({ success: false });
   }
 };
 
-const getAllExitRequests = async (req, res) => {
-  try {
-    const requests = await ExitRequest.find()
-      .populate("employeeId", "name email profilePic")
-      .sort({ createdAt: -1 });
-    res.json({ success: true, data: requests });
-  } catch {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch requests" });
-  }
-};
-
+/* =========================
+   EMPLOYEE → MY REQUESTS
+========================= */
 const getExitRequestsByEmployee = async (req, res) => {
   try {
-    const employeeId = req.user.id;
-    const requests = await ExitRequest.find({ employeeId });
-    res.json({ success: true, data: requests });
+    const data = await ExitRequest.find({
+      companyId: req.companyId,
+      employeeId: req.user._id,
+    }).sort({ createdAt: -1 });
+
+    res.json({ success: true, data });
   } catch {
-    res.status(500).json({ success: false, message: "Failed to fetch" });
+    res.status(500).json({ success: false });
   }
 };
 
+/* =========================
+   ADMIN → ALL REQUESTS
+========================= */
+const getAllExitRequests = async (req, res) => {
+  try {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ success: false });
+    }
+
+    const filter = {
+      companyId: req.companyId,
+    };
+
+    // 🔒 Branch-based admin (future-safe)
+    if (req.branchId) {
+      filter.branchId = req.branchId;
+    }
+
+    const data = await ExitRequest.find(filter)
+      .populate("employeeId", "name email profilePic")
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data });
+  } catch (err) {
+    console.error("Exit admin fetch error:", err);
+    res.status(500).json({ success: false });
+  }
+};
+
+/* =========================
+   ADMIN → UPDATE
+========================= */
 const updateExitRequestByAdmin = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { interviewFeedback, clearanceStatus, finalSettlement } = req.body;
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ success: false });
+    }
 
-    const updated = await ExitRequest.findByIdAndUpdate(
-      id,
+    const updated = await ExitRequest.findOneAndUpdate(
       {
-        interviewFeedback,
-        clearanceStatus,
-        finalSettlement,
+        _id: req.params.id,
+        companyId: req.companyId,
+      },
+      {
+        interviewFeedback: req.body.interviewFeedback,
+        clearanceStatus: req.body.clearanceStatus,
+        finalSettlement: req.body.finalSettlement,
       },
       { new: true }
     );
 
-    res.json({ success: true, message: "Exit request updated", data: updated });
+    res.json({ success: true, data: updated });
   } catch {
-    res.status(500).json({ success: false, message: "Update failed" });
+    res.status(500).json({ success: false });
   }
 };
 
+/* =========================
+   DELETE (PENDING ONLY)
+========================= */
 const deleteExitRequest = async (req, res) => {
   try {
-    const { id } = req.params;
-    const request = await ExitRequest.findById(id);
-    if (!request || request.clearanceStatus !== "pending") {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Only pending requests can be deleted",
-        });
+    const reqDoc = await ExitRequest.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
+    if (!reqDoc || reqDoc.clearanceStatus !== "pending") {
+      return res.status(400).json({ success: false });
     }
 
-    await ExitRequest.findByIdAndDelete(id);
-    res.json({ success: true, message: "Exit request deleted" });
+    await reqDoc.deleteOne();
+    res.json({ success: true });
   } catch {
-    res.status(500).json({ success: false, message: "Delete failed" });
+    res.status(500).json({ success: false });
   }
 };
 

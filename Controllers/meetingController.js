@@ -43,17 +43,23 @@ exports.createMeeting = async (req, res) => {
     const googleMeetLink = response.data.hangoutLink;
     const calendarEventId = response.data.id;
 
-    const meeting = new Meeting({
-      title,
-      description,
-      date,
-      startTime,
-      endTime,
-      createdBy: req.user.id,
-      participants,
-      googleMeetLink,
-      calendarEventId,
-    });
+const meeting = new Meeting({
+  companyId: req.companyId,
+  branchId: req.user.role === "admin" ? undefined : req.branchId,
+
+  title,
+  description,
+  date,
+  startTime,
+  endTime,
+
+  createdBy: req.user._id,
+  participants,
+
+  googleMeetLink,
+  calendarEventId,
+});
+
 
     await meeting.save();
 
@@ -114,14 +120,25 @@ const sendEmail = (to, title, description, start, end, meetLink) => {
 
 exports.getAllMeetings = async (req, res) => {
   try {
-    const meetings = await Meeting.find()
+    const filter = {
+      companyId: req.companyId,
+    };
+
+    // ❗ branch filter ONLY for employees
+    if (req.user.role !== "admin") {
+      filter.branchId = req.branchId;
+    }
+
+    const meetings = await Meeting.find(filter)
       .populate("createdBy", "name email")
       .populate("participants", "name email");
+
     res.status(200).json(meetings);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching meetings", error });
+    res.status(500).json({ message: "Error fetching meetings" });
   }
 };
+
 
 exports.updateMeeting = async (req, res) => {
   try {

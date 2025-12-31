@@ -2,12 +2,30 @@ const mongoose = require("mongoose");
 
 const DepartmentSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, unique: true },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User", 
+      required: true,
+      index: true,
+    },
+
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      required: true,
+      index: true,
+    },
+
+    name: { type: String, required: true },
     description: { type: String },
   },
   { timestamps: true }
 );
 
-const departmentTbl = mongoose.model("Department", DepartmentSchema);
+// same company + same branch me duplicate department na ho
+DepartmentSchema.index(
+  { companyId: 1, branchId: 1, name: 1 },
+  { unique: true }
+);
 
-module.exports = departmentTbl;
+module.exports = mongoose.model("Department", DepartmentSchema);
