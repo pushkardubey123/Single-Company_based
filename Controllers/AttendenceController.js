@@ -71,7 +71,7 @@ const isWithinOfficeRange = (lat, lon) => {
 const markAttendance = async (req, res) => {
   try {
     const { latitude, longitude, liveImage } = req.body;
-const employeeId = req.user.id;
+const employeeId = req.user._id;
 
 console.log("ATTENDANCE PAYLOAD", {
   employeeId,

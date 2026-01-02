@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const verifyToken = require("../Middleware/auth");
 const {
   getMyNotifications,
   markAsRead,
@@ -12,16 +11,17 @@ const {
   clearBellNotifications,
 } = require("../Controllers/notificationController");
 
-router.get("/", verifyToken, getMyNotifications);
+const verifyToken = require("../Middleware/auth");
+const companyMiddleware = require("../Middleware/companyMiddleware");
 
-router.put("/:id/read", verifyToken, markAsRead);
+router.get("/",verifyToken, companyMiddleware, getMyNotifications);
+router.put("/:id/read",verifyToken, companyMiddleware, markAsRead);
+router.put("/clear-bell",verifyToken, companyMiddleware, clearBellNotifications);
+router.get("/employee/:employeeId",verifyToken, companyMiddleware, getEmployeeNotifications);
+router.get("/admin-alerts",verifyToken, companyMiddleware, getAdminAlerts);
+router.post("/send",verifyToken, companyMiddleware, sendCustomNotification);
+router.get("/all",verifyToken, companyMiddleware, getAllNotification);
+router.delete("/:id",verifyToken, companyMiddleware, deleteNotification);
 
-router.put("/clear-bell", verifyToken, clearBellNotifications);
-router.get("/employee/:employeeId", verifyToken, getEmployeeNotifications);
-
-router.get("/admin-alerts", verifyToken, getAdminAlerts);
-router.post("/send", sendCustomNotification);
-router.get("/all", getAllNotification);
-router.delete("/:id", verifyToken, deleteNotification);
 
 module.exports = router;

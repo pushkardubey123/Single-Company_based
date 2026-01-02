@@ -1,18 +1,32 @@
 const Notification = require("../Modals/Notification");
 const User = require("../Modals/User");
-const sendNotification = require("../utils/sendNotification");
 const pendingEmployee = require("../Modals/PendingUser");
 const Leave = require("../Modals/Leave");
 const Exit = require("../Modals/ExitRequest");
 const mongoose = require("mongoose");
+const fs = require("fs");
+const path = require("path");
 
+/* ================= ADMIN ALERTS ================= */
 exports.getAdminAlerts = async (req, res) => {
   try {
-    const pendingEmployees = await pendingEmployee.countDocuments();
-    const pendingLeaves = await Leave.countDocuments({ status: "Pending" });
+    const { companyId, branchId } = req;
+
+    const baseQuery = { companyId };
+    if (branchId) baseQuery.branchId = branchId;
+
+    const pendingEmployees = await pendingEmployee.countDocuments(baseQuery);
+
+    const pendingLeaves = await Leave.countDocuments({
+      ...baseQuery,
+      status: "Pending",
+    });
+
     const pendingExits = await Exit.countDocuments({
+      ...baseQuery,
       clearanceStatus: "pending",
     });
+
     res.json({
       success: true,
       data: [
@@ -22,154 +36,176 @@ exports.getAdminAlerts = async (req, res) => {
       ],
     });
   } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch admin alerts" });
+    res.status(500).json({ success: false, message: "Failed to fetch admin alerts" });
   }
 };
 
+/* ================= EMPLOYEE PAGE ================= */
 exports.getEmployeeNotifications = async (req, res) => {
   try {
     const { employeeId } = req.params;
+    const { companyId } = req;
 
     if (!mongoose.Types.ObjectId.isValid(employeeId)) {
       return res.status(400).json({ message: "Invalid employee ID" });
     }
 
     const notifications = await Notification.find({
+      companyId,
       recipient: employeeId,
     }).sort({ createdAt: -1 });
+
     res.status(200).json(notifications);
-  } catch (error) {
-    console.error("Fetch Notifications Error:", error);
+  } catch {
     res.status(500).json({ message: "Server Error" });
   }
 };
 
+
+/* ================= ADMIN ALL ================= */
 exports.getAllNotification = async (req, res) => {
   try {
-    const allNotifications = await Notification.find()
+    const { companyId, branchId } = req;
+
+    const query = { companyId };
+    if (branchId) query.branchId = branchId;
+
+    const allNotifications = await Notification.find(query)
       .populate("recipient", "name")
       .sort({ createdAt: -1 });
+
     res.status(200).json(allNotifications);
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Server Error" });
   }
 };
 
+/* ================= SEND CUSTOM ================= */
 exports.sendCustomNotification = async (req, res) => {
   try {
     const { title, message, recipient, type } = req.body;
+    const { companyId, branchId } = req;
+
+    if (!companyId || !title || !message) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
 
     let imageUrl = "";
 
-    if (req.files && req.files.image) {
-      const imageFile = req.files.image;
-      const fileName = `${Date.now()}_${imageFile.name}`;
-      const savePath = `./uploads/notifications/${fileName}`;
+if (req.files && req.files.image) {
+  // If single file, it can be object; if multiple, it can be array
+  const imageFile = Array.isArray(req.files.image)
+    ? req.files.image[0]
+    : req.files.image;
 
-      await imageFile.mv(savePath);
-      imageUrl = `notifications/${fileName}`;
-    }
+  const uploadDir = path.join(__dirname, "..", "uploads", "notifications");
+  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
+  const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, "_")}`;
+  await imageFile.mv(path.join(uploadDir, fileName));
+  imageUrl = `notifications/${fileName}`;
+}
+
+
+    /* 🔔 ALL EMPLOYEES */
     if (recipient === "all") {
-      const allEmployees = await User.find({ role: "employee" }, "_id");
+      const userQuery = { companyId, role: "employee" };
+      if (branchId) userQuery.branchId = branchId;
 
-      if (!allEmployees.length) {
-        return res
-          .status(404)
-          .json({ success: false, message: "No employees found" });
-      }
+      const employees = await User.find(userQuery, "_id");
 
-      const notifications = allEmployees.map((emp) => ({
+      const notifications = employees.map((emp) => ({
+        companyId,
+        branchId: branchId || undefined,
         title,
         message,
         recipient: emp._id,
         type: type || "custom",
-        image: imageUrl || null,
-        createdAt: new Date(),
+        image: imageUrl || undefined,
       }));
 
       await Notification.insertMany(notifications);
 
-      return res.status(200).json({
+      return res.json({
         success: true,
-        message: "Notification sent to all employees",
+        message: `Notification sent to ${employees.length} employees`,
       });
     }
 
-    const notification = new Notification({
+    /* 🔔 SINGLE */
+    if (!mongoose.Types.ObjectId.isValid(recipient)) {
+      return res.status(400).json({ message: "Invalid recipient" });
+    }
+
+    const notification = await Notification.create({
+      companyId,
+      branchId: branchId || undefined,
       title,
       message,
       recipient,
       type: type || "custom",
-      image: imageUrl || null,
-      createdAt: new Date(),
+      image: imageUrl || undefined,
     });
 
-    await notification.save();
-
-    return res.status(200).json({
-      success: true,
-      message: "Notification sent",
-      notification,
-    });
+    res.json({ success: true, notification });
   } catch (err) {
-    console.error("Send Notification Error:", err);
-    return res
-      .status(500)
-      .json({ success: false, message: "Failed to send notification" });
+    console.error("Send notification error:", err);
+    res.status(500).json({ success: false, message: "Failed to send notification" });
   }
 };
 
+/* ================= BELL ================= */
 exports.getMyNotifications = async (req, res) => {
   try {
+    const { companyId } = req;
+
     const notifs = await Notification.find({
-      recipient: req.user.id,
+      companyId,
+      recipient: req.user._id,
       removedFromBell: false,
     }).sort({ createdAt: -1 });
+
     res.json({ success: true, data: notifs });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch notifications" });
+  } catch {
+    res.status(500).json({ success: false, message: "Failed to fetch notifications" });
   }
 };
 
+
+/* ================= READ ================= */
 exports.markAsRead = async (req, res) => {
-  try {
-    await Notification.findByIdAndUpdate(req.params.id, { read: true });
-    res.json({ success: true, message: "Marked as read" });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to update notification" });
-  }
-};
-
-exports.clearBellNotifications = async (req, res) => {
-  try {
-    await Notification.updateMany(
-      { recipient: req.user.id },
-      { $set: { removedFromBell: true } }
-    );
-    res.json({ success: true, message: "Cleared from bell" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
-};
-
-exports.deleteNotification = async (req, res) => {
-  try {
-    await Notification.findOneAndDelete({
+  await Notification.findOneAndUpdate(
+    {
       _id: req.params.id,
-      recipient: req.user.id,
-    });
-    res.json({ success: true, message: "Notification deleted" });
-  } catch (err) {
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to delete notification" });
-  }
+      companyId: req.companyId,
+      recipient: req.user._id,
+    },
+    { read: true }
+  );
+
+  res.json({ success: true });
+};
+
+/* ================= CLEAR BELL ================= */
+exports.clearBellNotifications = async (req, res) => {
+  await Notification.updateMany(
+    {
+      companyId: req.companyId,
+      recipient: req.user._id,
+    },
+    { removedFromBell: true }
+  );
+
+  res.json({ success: true });
+};
+
+/* ================= DELETE ================= */
+exports.deleteNotification = async (req, res) => {
+  await Notification.findOneAndDelete({
+    _id: req.params.id,
+    companyId: req.companyId,
+    recipient: req.user._id,
+  });
+
+  res.json({ success: true });
 };

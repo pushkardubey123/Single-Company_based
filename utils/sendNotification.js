@@ -6,9 +6,27 @@ const sendNotification = async ({
   recipient,
   type = "custom",
   image,
+  companyId,
+  branchId,
+  meta = {},
+  isGlobal = false,
 }) => {
-  const notif = new Notification({ title, message, recipient, type, image });
-  await notif.save();
+  if (!companyId) {
+    throw new Error("companyId is required for notification");
+  }
+
+  const notif = await Notification.create({
+    title,
+    message,
+    recipient,
+    type,
+    image,
+    companyId,
+    branchId,
+    meta,
+    isGlobal,
+  });
+
   return notif;
 };
 
