@@ -66,7 +66,7 @@ router.get("/public/branches/:companyId", async (req, res) => {
 router.put("/branch/update/:id", auth, async (req, res) => {
   try {
     const branch = await Branch.findOneAndUpdate(
-      { _id: req.params.id, companyId: req.user.id }, // 🔥 ownership check
+      { _id: req.params.id, companyId: req.user._id },
       req.body,
       { new: true }
     );
@@ -90,6 +90,7 @@ router.put("/branch/update/:id", auth, async (req, res) => {
     });
   }
 });
+
 
 router.delete("/branch/delete/:id", auth, async (req, res) => {
   try {

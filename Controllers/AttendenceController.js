@@ -182,29 +182,40 @@ const attendance = new attendanceTbl({
 
 const markSession = async (req, res) => {
   try {
-    const { latitude, longitude, actionType } = req.body;
-const employeeId = req.user.id;
+    // 🔧 FIX 1: force number conversion
+    const latitude = Number(req.body.latitude);
+    const longitude = Number(req.body.longitude);
+    const { actionType } = req.body;
 
+    // 🔧 FIX 2: same pattern as markAttendance
+    const employeeId = req.user._id;
 
- if (
-  !employeeId ||
-  typeof latitude !== "number" ||
-  typeof longitude !== "number" ||
-  !actionType
-) {
-
-      return res.status(400).json({ success: false, message: "Missing fields" });
-      
+    // 🔧 FIX 3: proper validation
+    if (
+      !employeeId ||
+      Number.isNaN(latitude) ||
+      Number.isNaN(longitude) ||
+      !["in", "out"].includes(actionType)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing fields",
+      });
     }
 
     const employee = await userTbl.findById(employeeId);
     if (!employee) {
-      return res.status(404).json({ success: false, message: "Employee not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
     }
 
-    // fetch branch or fallback
+    // ================= LOCATION CHECK =================
     let branchInfo = null;
-    if (employee.branchId) branchInfo = await getBranchLocation(employee.branchId);
+    if (employee.branchId) {
+      branchInfo = await getBranchLocation(employee.branchId);
+    }
 
     let allowedLat = officeLocation.latitude;
     let allowedLon = officeLocation.longitude;
@@ -216,7 +227,14 @@ const employeeId = req.user.id;
       allowedRadius = branchInfo.radius || allowedRadius;
     }
 
-    const inside = isWithinBranchRange(latitude, longitude, allowedLat, allowedLon, allowedRadius);
+    const inside = isWithinBranchRange(
+      latitude,
+      longitude,
+      allowedLat,
+      allowedLon,
+      allowedRadius
+    );
+
     if (!inside) {
       return res.status(403).json({
         success: false,
@@ -224,6 +242,7 @@ const employeeId = req.user.id;
       });
     }
 
+    // ================= ATTENDANCE SESSION =================
     const todayStart = moment.tz("Asia/Kolkata").startOf("day").toDate();
     const todayEnd = moment.tz("Asia/Kolkata").endOf("day").toDate();
     const currentTime = getCurrentTime();
@@ -233,28 +252,40 @@ const employeeId = req.user.id;
       date: { $gte: todayStart, $lte: todayEnd },
     });
 
+    // 🔹 First IN
     if (!attendance && actionType === "in") {
-attendance = new attendanceTbl({
-  employeeId: employee._id,
-  companyId: employee.companyId,
-  branchId: employee.branchId,
-  date: getISTDate(),
-  inTime: currentTime,
-  location: { latitude, longitude },
-  status: "Present",
-  statusType: "Auto",
-  inOutLogs: [{ inTime: currentTime, outTime: null }],
-});
+      attendance = new attendanceTbl({
+        employeeId: employee._id,
+        companyId: employee.companyId,
+        branchId: employee.branchId,
+        date: getISTDate(),
+        inTime: currentTime,
+        location: { latitude, longitude },
+        status: "Present",
+        statusType: "Auto",
+        inOutLogs: [{ inTime: currentTime, outTime: null }],
+      });
+    }
 
-    } else if (attendance) {
+    // 🔹 Existing attendance
+    else if (attendance) {
       const last = attendance.inOutLogs[attendance.inOutLogs.length - 1];
+
       if (actionType === "in") {
         if (!last || last.outTime) {
-          attendance.inOutLogs.push({ inTime: currentTime, outTime: null });
+          attendance.inOutLogs.push({
+            inTime: currentTime,
+            outTime: null,
+          });
         } else {
-          return res.status(400).json({ success: false, message: "Already checked in" });
+          return res.status(400).json({
+            success: false,
+            message: "Already checked in",
+          });
         }
-      } else if (actionType === "out") {
+      }
+
+      if (actionType === "out") {
         if (last && !last.outTime) {
           last.outTime = currentTime;
         } else {
@@ -265,16 +296,28 @@ attendance = new attendanceTbl({
         }
       }
     } else {
-      return res.status(400).json({ success: false, message: "No attendance record for today" });
+      return res.status(400).json({
+        success: false,
+        message: "No attendance record for today",
+      });
     }
 
     const saved = await attendance.save();
-    res.status(200).json({ success: true, message: "Session updated", data: saved });
+
+    res.status(200).json({
+      success: true,
+      message: "Session updated",
+      data: saved,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    console.error("MARK SESSION ERROR:", err);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
+
 
 const getMonthlyAttendance = async (req, res) => {
   try {

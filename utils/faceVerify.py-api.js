@@ -22,7 +22,7 @@ contentType: "image/jpeg",
   
 
 const response = await axios.post(
-    "http://localhost:8000/verify-face",
+    "https://face-recognition-production-2ef6.up.railway.app/verify-face",
 form,
 { headers: form.getHeaders() }
 );
