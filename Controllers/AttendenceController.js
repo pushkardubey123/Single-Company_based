@@ -72,13 +72,6 @@ const markAttendance = async (req, res) => {
   try {
     const { latitude, longitude, liveImage } = req.body;
 const employeeId = req.user._id;
-
-console.log("ATTENDANCE PAYLOAD", {
-  employeeId,
-  latitude,
-  longitude,
-  hasImage: !!liveImage
-});
     if (
   !employeeId ||
   typeof latitude !== "number" ||
