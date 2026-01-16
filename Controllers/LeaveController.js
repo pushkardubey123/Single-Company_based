@@ -112,20 +112,20 @@ const data = await leaveTbl
 
 const getLeavesByEmployee = async (req, res) => {
   try {
-    const leaves = await leaveTbl
-      .find({
-        employeeId: req.params.id,
-        companyId: req.companyId,
-        branchId: req.user.branchId,
-      })
-      .sort({ createdAt: -1 });
+    const filter = { 
+      employeeId: req.params.id, 
+      companyId: req.companyId 
+    };
 
-    res.json({
-      success: true,
-      data: leaves,
-    });
-  } catch {
-    res.status(500).json({ success: false });
+    // Agar user admin nahi hai, tabhi branch ka filter lagao
+    if (req.user.role !== 'admin') {
+      filter.branchId = req.user.branchId;
+    }
+
+    const leaves = await leaveTbl.find(filter).sort({ createdAt: -1 });
+    res.json({ success: true, data: leaves });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

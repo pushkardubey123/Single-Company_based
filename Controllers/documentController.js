@@ -1,4 +1,5 @@
 const Document = require("../Modals/Document");
+const User = require("../Modals/User"); // ✅ REQUIRED
 const path = require("path");
 const fs = require("fs");
 const deleteFile = require("../utils/deleteFile");
@@ -36,20 +37,22 @@ exports.uploadDocument = async (req, res) => {
       employeeId,
       documentType,
       fileUrl: `documents/${filename}`,
-      uploadedBy: req.user.id,
+      uploadedBy: req.user._id, // ✅ FIX
     });
 
     await newDoc.save();
 
     res.status(201).json({
       success: true,
-      message: "Document uploaded",
+      message: "Document uploaded successfully",
       data: newDoc,
     });
   } catch (error) {
+    console.error("UPLOAD ERROR:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 
 exports.getDocuments = async (req, res) => {

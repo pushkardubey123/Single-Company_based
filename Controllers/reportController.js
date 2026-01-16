@@ -147,25 +147,25 @@ const getReports = async (req, res) => {
 
 const getDashboardAnalytics = async (req, res) => {
   try {
+    // Admin ke liye uska khud ka ID hi companyId hai (as per your logic)
+    const companyId = req.user.role === "admin" ? req.user._id : req.user.companyId;
+
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+
     const [
-      employeeCount,
-      leaveCount,
-      attendanceCount,
-      exitCount,
-      todayAttendance,
-      projectCount,
+      employeeCount, leaveCount, attendanceCount,
+      exitCount, todayAttendance, projectCount,
     ] = await Promise.all([
-      User.countDocuments({ role: "employee" }),
-      Leave.countDocuments(),
-      Attendance.countDocuments(),
-      Exit.countDocuments(),
+      User.countDocuments({ role: "employee", companyId }),
+      Leave.countDocuments({ companyId }),
+      Attendance.countDocuments({ companyId }),
+      Exit.countDocuments({ companyId }),
       Attendance.countDocuments({
-        date: {
-          $gte: new Date(new Date().setHours(0, 0, 0, 0)),
-          $lt: new Date(new Date().setHours(23, 59, 59, 999)),
-        },
+        companyId,
+        date: { $gte: start, $lt: end },
       }),
-      Project.countDocuments(),
+      Project.countDocuments({ companyId }),
     ]);
 
     res.json({
@@ -179,11 +179,10 @@ const getDashboardAnalytics = async (req, res) => {
         exitRequests: exitCount,
       },
     });
-  } catch {
+  } catch (error) {
     res.status(500).json({ success: false, message: "Analytics error" });
   }
 };
-
 module.exports = {
   generateDynamicReport,
   getReports,

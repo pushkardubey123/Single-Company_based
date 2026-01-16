@@ -226,7 +226,7 @@ exports.getPayrollByEmployeeId = async (req, res) => {
 exports.getMyPayrolls = async (req, res) => {
   try {
    const payrolls = await Payroll.find({
-  employeeId: req.user.id,
+  employeeId: req.user._id,
   companyId: req.companyId,
 })
 .populate({

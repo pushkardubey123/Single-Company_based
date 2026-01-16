@@ -1,82 +1,85 @@
 const attendanceTbl = require("../Modals/Attendence");
+const OfficeTiming = require("../Modals/OfficeTiming");
 const mongoose = require("mongoose");
+const moment = require("moment");
 
-/* ================= UTILS ================= */
-const calculateDuration = (inTime, outTime) => {
-  if (!inTime || !outTime) return 0;
+const calculateOfficeHoursDuration = (logIn, logOut, officeStart, officeEnd) => {
+    if (!logIn || !logOut || !officeStart || !officeEnd) return 0;
 
-  const [inH, inM] = inTime.split(":").map(Number);
-  const [outH, outM] = outTime.split(":").map(Number);
+    // Convert strings to moment objects for today
+    const start = moment(logIn, "HH:mm:ss A");
+    const end = moment(logOut, "HH:mm:ss A");
+    const oStart = moment(officeStart, "HH:mm");
+    const oEnd = moment(officeEnd, "HH:mm");
 
-  const start = new Date(0, 0, 0, inH, inM);
-  const end = new Date(0, 0, 0, outH, outM);
+    // Intersecting time: Jo waqt office hours ke andar hai sirf wahi count hoga
+    const actualStart = moment.max(start, oStart);
+    const actualEnd = moment.min(end, oEnd);
 
-  const diff = (end - start) / (1000 * 60 * 60);
-  return diff > 0 ? diff : 0;
+    const diff = actualEnd.diff(actualStart, 'hours', true);
+    return diff > 0 ? diff : 0;
 };
 
-/* ================= ADMIN REPORT ================= */
 const getTimesheetReport = async (req, res) => {
-  try {
-    const { startDate, endDate, employee } = req.query;
-    const { companyId } = req;
-    const filter = {
-      companyId, // ✅ IMPORTANT
-    };
+    try {
+        const { startDate, endDate, employee } = req.query;
+        const { companyId } = req;
+        const filter = { companyId };
 
-    // branch scoped (admin ke branch se)
-    if (req.user.role !== "admin" && req.user.branchId) {
-      filter.branchId = req.user.branchId;
-    }
-
-    if (startDate && endDate) {
-      filter.date = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    }
-
-    if (employee && employee !== "all") {
-      filter.employeeId = employee;
-    }
-
-    const records = await attendanceTbl
-      .find(filter)
-      .populate("employeeId", "name email")
-      .populate("branchId", "name");
-
-    const result = records.map((record) => {
-      let totalHours = 0;
-
-      for (const log of record.inOutLogs || []) {
-        if (log.inTime && log.outTime) {
-          totalHours += calculateDuration(log.inTime, log.outTime);
+        if (req.user.role !== "admin" && req.user.branchId) {
+            filter.branchId = req.user.branchId;
         }
-      }
 
-      return {
-        _id: record._id,
-        employee: record.employeeId,
-        branch: record.branchId,
-        date: record.date,
-        hours: Number(totalHours.toFixed(2)),
-        status: record.status,
-        remark: record.status === "Late" ? "Late Arrival" : "",
-      };
-    });
+        if (startDate && endDate) {
+            filter.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+        }
 
-    res.status(200).json({
-      success: true,
-      message: "Timesheet report fetched",
-      data: result,
-    });
-  } catch (err) {
-    console.error("Timesheet report error:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
-  }
+        if (employee && employee !== "all") {
+            filter.employeeId = employee;
+        }
+
+        const records = await attendanceTbl
+            .find(filter)
+            .populate("employeeId", "name email")
+            .populate("branchId", "name");
+
+        // Fetch all office timings once to avoid multiple DB calls in loop
+        const allTimings = await OfficeTiming.find({ companyId });
+
+        const result = records.map((record) => {
+            let totalWorkedHours = 0;
+            const branchTiming = allTimings.find(t => 
+                t.branchId.toString() === record.branchId?._id.toString()
+            );
+
+            if (branchTiming) {
+                for (const log of record.inOutLogs || []) {
+                    if (log.inTime && log.outTime) {
+                        totalWorkedHours += calculateOfficeHoursDuration(
+                            log.inTime, 
+                            log.outTime, 
+                            branchTiming.officeStart, 
+                            branchTiming.officeEnd
+                        );
+                    }
+                }
+            }
+
+            return {
+                _id: record._id,
+                employee: record.employeeId,
+                branch: record.branchId,
+                date: record.date,
+                hours: Number(totalWorkedHours.toFixed(2)),
+                status: record.status,
+                remark: record.status === "Late" ? "Late Arrival" : "",
+            };
+        });
+
+        res.status(200).json({ success: true, data: result });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server error" });
+    }
 };
 
 /* ================= SINGLE EMPLOYEE ================= */
@@ -120,7 +123,4 @@ const getEmployeeTimesheet = async (req, res) => {
   }
 };
 
-module.exports = {
-  getTimesheetReport,
-  getEmployeeTimesheet,
-};
+module.exports = { getTimesheetReport, getEmployeeTimesheet };

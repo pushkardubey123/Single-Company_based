@@ -18,7 +18,6 @@ const register = async (req, res) => {
       gender,
       dob,
       address,
-      companyId,
       departmentId,
       designationId,
       shiftId,
@@ -27,60 +26,79 @@ const register = async (req, res) => {
       pan,
       bankAccount,
       branchId,
+      basicSalary,
     } = req.body;
-// ✅ FINAL companyId resolution
-let finalCompanyId;
 
-// Admin adding employee (logged-in)
-if (req.user && req.user.role === "admin") {
-  finalCompanyId = req.user.companyId;
-}
-// Public registration
-else {
-  finalCompanyId = companyId;
-}
+    // 🔐 Resolve company
+    const finalCompanyId =
+      req.user && req.user.role === "admin"
+        ? req.user.companyId
+        : req.body.companyId;
 
-if (!finalCompanyId) {
-  return res.status(400).json({
-    success: false,
-    message: "Company is required",
-  });
-}
+    if (!finalCompanyId)
+      return res.status(400).json({ success: false, message: "Company required" });
 
+    if (!branchId)
+      return res.status(400).json({ success: false, message: "Branch required" });
 
-    if (!branchId) {
-      return res.status(400).json({
-        success: false,
-        message: "Branch is required",
-      });
-    }
-
+    // ❌ Email check (both tables)
     const emailExists =
-      (await pendingTbl.findOne({ email })) ||
-      (await userTbl.findOne({ email }));
+      (await userTbl.findOne({ email })) ||
+      (await pendingTbl.findOne({ email }));
 
-    if (emailExists) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already exists",
-      });
-    }
+    if (emailExists)
+      return res.status(400).json({ success: false, message: "Email already exists" });
 
+    /* ================= PROFILE PIC ================= */
     let profilePic = null;
-
     if (req.files?.profilePic) {
       const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
-
-      if (!fs.existsSync(uploadPath)) {
-        fs.mkdirSync(uploadPath, { recursive: true });
-      }
+      if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
 
       const filename = `${Date.now()}_${img.name}`;
       await img.mv(path.join(uploadPath, filename));
       profilePic = `profiles/${filename}`;
     }
 
+    /* ================= ADMIN ADDING EMPLOYEE ================= */
+    if (req.user && req.user.role === "admin") {
+      const passwordHash = await bcrypt.hash(password, 10);
+      console.log(req.user)
+
+      const user = new userTbl({
+        name,
+        email,
+        phone,
+        gender,
+        dob,
+        address,
+        departmentId,
+        designationId,
+        shiftId,
+        doj,
+        emergencyContact: emergencyContact
+          ? JSON.parse(emergencyContact)
+          : null,
+        profilePic,
+        pan,
+        bankAccount,
+        branchId,
+        companyId: finalCompanyId,
+        passwordHash,
+        role: "employee",
+        basicSalary: basicSalary || 0,
+      });
+
+      await user.save();
+
+      return res.status(201).json({
+        success: true,
+        message: "Employee added successfully",
+      });
+    }
+
+    /* ================= PUBLIC REGISTRATION ================= */
     const pendingUser = new pendingTbl({
       name,
       email,
@@ -100,7 +118,7 @@ if (!finalCompanyId) {
       pan,
       bankAccount,
       branchId,
-      companyId:finalCompanyId // ✅ FIX
+      companyId: finalCompanyId,
     });
 
     await pendingUser.save();
@@ -114,6 +132,7 @@ if (!finalCompanyId) {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
 
 /* ================= LOGIN ================= */
 const login = async (req, res) => {
