@@ -2,7 +2,8 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-
+const { OAuth2Client } = require("google-auth-library");
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const userTbl = require("../Modals/User");
 const pendingTbl = require("../Modals/PendingUser");
 const sendOTP = require("../utils/sendOtp");
@@ -462,6 +463,244 @@ const userResetPassword = async (req, res) => {
   res.json({ success: true, message: "Password reset successful" });
 };
 
+const googleLogin = async (req, res) => {
+  try {
+    const { credential, role } = req.body;
+
+    // 1. Verify Google Token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { email, name, sub, picture } = payload;
+
+    // 2. Check if user exists
+    let user = await userTbl.findOne({ email });
+
+    if (user) {
+      // User exists - Log them in
+      const token = jwt.sign(
+        {
+          id: user._id,
+          role: user.role,
+          companyId: user.role === "admin" ? user._id : user.companyId,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      return res.json({
+        success: true,
+        token,
+        data: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          companyId: user.companyId,
+          profilePic: user.profilePic,
+        },
+      });
+    } else {
+      // 3. User does NOT exist
+      if (role === "Admin") {
+        // Create new Admin User automatically
+        const newUser = new userTbl({
+          name,
+          email,
+          role: "admin",
+          authProvider: "google",
+          googleId: sub,
+          profilePic: picture,
+          status: "active",
+          // Password hash is not needed for Google Auth
+        });
+
+        // For Admin, companyId is usually their own ID
+        newUser.companyId = newUser._id; 
+        
+        await newUser.save();
+
+        const token = jwt.sign(
+          { id: newUser._id, role: "admin", companyId: newUser._id },
+          process.env.JWT_SECRET,
+          { expiresIn: "1d" }
+        );
+
+        return res.status(201).json({
+          success: true,
+          message: "Admin registered via Google",
+          token,
+          data: {
+            id: newUser._id,
+            name: newUser.name,
+            email: newUser.email,
+            role: "admin",
+            companyId: newUser._id,
+            profilePic: newUser.profilePic,
+          },
+        });
+      } else {
+        // If role is Employee, deny access (Employees must be added by Admin first)
+        return res.status(403).json({
+          success: false,
+          message: "Employees must be registered by the Company Admin first.",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Google Login Error:", error);
+    res.status(500).json({ success: false, message: "Google Authentication failed" });
+  }
+};
+
+/* ================= GOOGLE AUTH CHECK & LOGIN ================= */
+const googleAuthCheck = async (req, res) => {
+  try {
+    const { credential } = req.body;
+
+    // 1. Verify Token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    const { email, name, sub, picture } = payload;
+
+    // 2. Check Active User Table
+    let user = await userTbl.findOne({ email });
+
+    if (user) {
+      // --- SCENARIO A: Existing User (Direct Login) ---
+      const token = jwt.sign(
+        {
+          id: user._id,
+          role: user.role,
+          companyId: user.role === "admin" ? user._id : user.companyId,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      return res.json({
+        success: true,
+        mode: "LOGIN",
+        token,
+        data: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          companyId: user.companyId,
+          profilePic: user.profilePic,
+        },
+      });
+    }
+
+    // 3. Check Pending Table (If Employee waiting for approval)
+    let pending = await pendingTbl.findOne({ email });
+    if (pending) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is awaiting Admin approval.",
+      });
+    }
+
+    // --- SCENARIO B: New User (Send Data to Frontend for Modal) ---
+    return res.json({
+      success: true,
+      mode: "REGISTER",
+      googleData: {
+        email,
+        name,
+        googleId: sub,
+        profilePic: picture,
+      },
+    });
+
+  } catch (error) {
+    console.error("Google Auth Error:", error);
+    res.status(500).json({ success: false, message: "Google Authentication failed" });
+  }
+};
+
+/* ================= GOOGLE REGISTRATION (After Modal) ================= */
+const googleRegister = async (req, res) => {
+  try {
+    const { 
+      role, 
+      googleData, 
+      employeeDetails // { companyId, branchId, departmentId, designationId, shiftId }
+    } = req.body;
+
+    if (role === "Admin") {
+      // --- Create Admin Immediately ---
+      const newUser = new userTbl({
+        name: googleData.name,
+        email: googleData.email,
+        role: "admin",
+        authProvider: "google",
+        googleId: googleData.googleId,
+        profilePic: googleData.profilePic,
+        status: "active",
+      });
+
+      // Assign Company ID as own ID
+      newUser.companyId = newUser._id;
+      await newUser.save();
+
+      const token = jwt.sign(
+        { id: newUser._id, role: "admin", companyId: newUser._id },
+        process.env.JWT_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      return res.json({
+        success: true,
+        mode: "CREATED_ADMIN",
+        token,
+        data: newUser,
+      });
+
+    } else if (role === "Employee") {
+      // --- Create Pending User ---
+      
+      // Validate required fields
+      if (!employeeDetails.companyId || !employeeDetails.branchId) {
+        return res.status(400).json({ success: false, message: "Company & Branch details are required." });
+      }
+
+      const newPending = new pendingTbl({
+        name: googleData.name,
+        email: googleData.email,
+        authProvider: "google",
+        googleId: googleData.googleId,
+        profilePic: googleData.profilePic,
+        
+        // Employee Specific Fields
+        companyId: employeeDetails.companyId,
+        branchId: employeeDetails.branchId,
+        departmentId: employeeDetails.departmentId,
+        designationId: employeeDetails.designationId,
+        shiftId: employeeDetails.shiftId,
+      });
+
+      await newPending.save();
+
+      return res.json({
+        success: true,
+        mode: "CREATED_PENDING",
+        message: "Registration successful! Please wait for Admin approval.",
+      });
+    }
+
+  } catch (error) {
+    console.error("Google Register Error:", error);
+    res.status(500).json({ success: false, message: "Registration failed" });
+  }
+};
+
 /* ================= EXPORT ================= */
 module.exports = {
   register,
@@ -478,4 +717,7 @@ module.exports = {
   rejectPendingUser,
   getBirthdaysAndAnniversaries,
   getAllEmployeeDates,
+  googleLogin,
+  googleAuthCheck,
+  googleRegister
 };

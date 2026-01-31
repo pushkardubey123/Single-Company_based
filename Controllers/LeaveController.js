@@ -1,48 +1,44 @@
 const leaveTbl = require("../Modals/Leave");
 const moment = require("moment");
+const mongoose = require("mongoose"); // ✅ Required for ObjectId casting
 
 const getLeaveReport = async (req, res) => {
   try {
     const { type, month, year } = req.query;
-
     let start, end;
     if (type === "Monthly") {
-      if (!month) {
-        return res.status(400).json({
-          success: false,
-          message: "Month is required for monthly report",
-        });
-      }
+      if (!month) return res.status(400).json({ success: false, message: "Month is required" });
       start = moment(month, "YYYY-MM").startOf("month").toDate();
       end = moment(month, "YYYY-MM").endOf("month").toDate();
     } else if (type === "Yearly") {
-      if (!year) {
-        return res.status(400).json({
-          success: false,
-          message: "Year is required for yearly report",
-        });
-      }
+      if (!year) return res.status(400).json({ success: false, message: "Year is required" });
       start = moment(year, "YYYY").startOf("year").toDate();
       end = moment(year, "YYYY").endOf("year").toDate();
     } else {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid type. Must be Monthly or Yearly",
-      });
+      return res.status(400).json({ success: false, message: "Invalid type" });
     }
 
+    // ✅ FIX 1: Ensure CompanyId is ObjectId
+    const companyIdObject = new mongoose.Types.ObjectId(req.companyId);
+
+    // ✅ FIX 2: Better Logic (Leaves jo is mahine ACTIVE thin, na ki bas start hui thin)
+    // Agar leave Dec 25 ko start hui aur Jan 5 ko khatam hui, to wo Jan ki report me dikhni chahiye.
+    // Logic: (LeaveStart <= MonthEnd) AND (LeaveEnd >= MonthStart)
     const filter = {
-  companyId: req.companyId,
-  startDate: { $gte: start, $lte: end },
-};
+      companyId: companyIdObject,
+      startDate: { $lte: end }, // Start date month end se pehle honi chahiye
+      endDate: { $gte: start }  // End date month start ke baad honi chahiye
+    };
 
-if (req.user.branchId) {
-  filter.branchId = req.user.branchId;
-}
-
-const leaves = await leaveTbl
-  .find(filter)
-  .populate("employeeId", "name email");
+    // Branch Filter (Only if not Admin)
+    if (req.user.role !== 'admin' && req.user.branchId) {
+      filter.branchId = req.user.branchId;
+    }
+    
+    const leaves = await leaveTbl
+      .find(filter)
+      .populate("employeeId", "name email profileImage role")
+      .sort({ startDate: -1 });
 
 
     res.json({
@@ -50,8 +46,8 @@ const leaves = await leaveTbl
       data: leaves,
     });
   } catch (err) {
-    console.error("Error fetching leave report:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error("❌ Error fetching leave report:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 

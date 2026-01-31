@@ -21,15 +21,6 @@ companyId: {
   documentType: {
     type: String,
     required: true,
-    enum: [
-      "Aadhaar",
-      "PAN",
-      "Resume",
-      "Offer Letter",
-      "Experience Letter",
-      "Bank Details",
-      "Others",
-    ],
   },
   fileUrl: {
     type: String,

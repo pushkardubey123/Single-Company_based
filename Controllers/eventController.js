@@ -70,18 +70,15 @@ exports.getAllEvents = async (req, res) => {
 
 exports.updateEvent = async (req, res) => {
   try {
-    const updated = await Event.findOneAndUpdate(
-      {
-        _id: req.params.id,
-        companyId: req.companyId,
-        branchId: req.branchId,
-      },
+    // Check karein ki id valid hai ya nahi
+    const updated = await Event.findByIdAndUpdate(
+      req.params.id, // Direct ID se find karein 
       req.body,
       { new: true }
     );
 
     if (!updated) {
-      return res.status(404).json({ success: false });
+      return res.status(404).json({ success: false, message: "Event not found" });
     }
 
     res.json({ success: true, data: updated });
@@ -90,17 +87,12 @@ exports.updateEvent = async (req, res) => {
   }
 };
 
-
 exports.deleteEvent = async (req, res) => {
   try {
-    const deleted = await Event.findOneAndDelete({
-      _id: req.params.id,
-      companyId: req.companyId,
-      branchId: req.branchId,
-    });
+    const deleted = await Event.findByIdAndDelete(req.params.id);
 
     if (!deleted) {
-      return res.status(404).json({ success: false });
+      return res.status(404).json({ success: false, message: "Event not found" });
     }
 
     res.json({ success: true, message: "Event deleted" });
@@ -108,7 +100,6 @@ exports.deleteEvent = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 exports.gelOneEvent = async (req, res) => {
   try {
     const userId = req.params.id;
@@ -127,14 +118,15 @@ exports.gelOneEvent = async (req, res) => {
       ? employee.department
       : [employee.department];
 
-    const events = await Event.find({
-      companyId: req.companyId,
-      branchId: req.branchId,
-      $or: [
-        { employeeId: userId },
-        { departmentId: { $in: departmentIds } },
-      ],
-    })
+const events = await Event.find({
+  companyId: req.companyId,
+  $or: [
+    { employeeId: userId },
+    { departmentId: { $in: departmentIds } },
+    { departmentId: { $exists: false } }, // Event jisme dept nahi hai (All Dept)
+    { departmentId: null } 
+  ],
+})
       .populate("createdBy", "name")
       .populate("departmentId", "name");
 

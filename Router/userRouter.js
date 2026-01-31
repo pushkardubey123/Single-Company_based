@@ -15,6 +15,9 @@ const {
   approvePendingUser,
   rejectPendingUser,
   getAllEmployeeDates,
+  googleLogin,
+  googleRegister,
+  googleAuthCheck,
 } = require("../Controllers/UserController");
 
 const auth = require("../Middleware/auth");
@@ -23,6 +26,9 @@ const userTbl = require("../Modals/User");
 
 router.post("/user/register", register);
 router.post("/user/login", login);
+router.post("/user/google-login", googleLogin);
+router.post("/user/google-auth-check", googleAuthCheck);
+router.post("/user/google-register", googleRegister);
 
 router.get("/user", auth, attachCompanyId, getAllUsers);
 router.get("/employeeget/:id", auth, attachCompanyId, getUserById);
