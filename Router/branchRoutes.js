@@ -4,28 +4,38 @@ const Branch = require("../Modals/Branch");
 const auth = require("../Middleware/auth");
 const attachCompanyId= require("../Middleware/companyMiddleware")
 
+// routes/branch.js
+
 router.post("/branch/create", auth, async (req, res) => {
+  // Check permission
   if (req.user.role !== "admin") {
     return res.json({ success: false, message: "Access Denied" });
   }
 
   try {
+    // FIX: Use req.user._id OR req.user.id (Safe check)
+    const userId = req.user._id || req.user.id;
+
+    if (!userId) {
+      return res.json({ success: false, message: "User ID not found in token" });
+    }
+
     const branch = await Branch.create({
       ...req.body,
-      companyId: req.user.id, 
+      companyId: userId, // Fixed ID assignment
     });
 
-    res.json({ success: true, message: "Branch Created", data: branch });
+    res.json({ success: true, message: "Branch Created Successfully", data: branch });
   } catch (err) {
+    console.error("Create Branch Error:", err); // Server console me error print karega
     res.json({
       success: false,
       message: err.code === 11000
-        ? "Branch already exists for this company"
-        : "Error creating branch",
+        ? "Branch with this name already exists!"
+        : "Error saving to database: " + err.message,
     });
   }
 });
-
 
 router.get("/branch", auth,attachCompanyId, async (req, res) => {
   try {

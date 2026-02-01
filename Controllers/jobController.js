@@ -7,7 +7,6 @@ exports.addJob = async (req, res) => {
     body.companyId = req.companyId;
     body.createdBy = req.user._id;
 
-    // 🔥 FIX FOR BRANCH
     if (!body.branchId && req.branchId) {
       body.branchId = req.branchId;
     }
