@@ -10,6 +10,191 @@ const OfficeTiming = require("../Modals/OfficeTiming");
 const fs = require("fs");
 const path = require("path");
 
+const Leave = require("../Modals/Leave");
+const Holiday = require("../Modals/Leave/Holiday");
+const LeaveSettings = require("../Modals/Leave/LeaveSettings");
+
+const syncPastAttendance = async (req, res) => {
+  try {
+    const { employeeId } = req.body;
+    const companyId = req.companyId;
+
+    // 1. Employees Fetch
+    let filter = { companyId, role: "employee", status: "active" };
+    if (employeeId) filter._id = employeeId;
+    const employees = await userTbl.find(filter);
+
+    // 2. Settings & Holidays
+    let settings = await LeaveSettings.findOne({ companyId });
+    if (!settings) settings = { isSaturdayOff: true, isSundayOff: true };
+    const holidays = await Holiday.find({ companyId });
+
+    let updatedCount = 0;
+
+    for (const emp of employees) {
+      if (!emp.doj) continue;
+
+      const start = moment(emp.doj).tz("Asia/Kolkata").startOf("day");
+      const end = moment().tz("Asia/Kolkata").subtract(1, 'days').endOf("day");
+
+      let loopDate = start.clone();
+
+      while (loopDate.isSameOrBefore(end)) {
+        const todayStart = loopDate.clone().startOf('day').toDate();
+        const todayEnd = loopDate.clone().endOf('day').toDate();
+        const dateStr = loopDate.format("YYYY-MM-DD");
+        const dayOfWeek = loopDate.day();
+
+        // 🔥 STEP A: Find Existing Record (Duplicate Rokne ke liye)
+        let attendance = await attendanceTbl.findOne({
+          employeeId: emp._id,
+          date: { $gte: todayStart, $lte: todayEnd }
+        });
+
+        // Determine What the Status SHOULD Be
+        let targetStatus = "Absent";
+        let remarks = "System Auto";
+
+        // 1. Check Weekend
+        if ((dayOfWeek === 0 && settings.isSundayOff) || (dayOfWeek === 6 && settings.isSaturdayOff)) {
+          targetStatus = "Weekly Off";
+        }
+
+        // 2. Check Holiday
+        const isHoliday = holidays.some(h => {
+             const hStart = moment(h.startDate).format("YYYY-MM-DD");
+             const hEnd = moment(h.endDate).format("YYYY-MM-DD");
+             return dateStr >= hStart && dateStr <= hEnd;
+        });
+        if (isHoliday) {
+            targetStatus = "Holiday";
+            remarks = "Holiday";
+        }
+
+        // 3. 🔥 Check Approved Leave (Sabse Important)
+        if (targetStatus === "Absent") {
+            const leave = await Leave.findOne({
+              employeeId: emp._id,
+              status: "Approved",
+              // Leave Range Logic:
+              startDate: { $lte: todayEnd }, 
+              endDate: { $gte: todayStart }
+            });
+            
+            if (leave) {
+              targetStatus = "On Leave";
+              remarks = leave.leaveType;
+            }
+        }
+
+        // 🔥 STEP B: Action based on Existence
+        if (!attendance) {
+            // Case 1: Record hi nahi hai -> Create New
+            await attendanceTbl.create({
+                employeeId: emp._id,
+                companyId,
+                branchId: emp.branchId,
+                date: loopDate.toDate(), // Store standard Date object
+                inTime: "00:00",
+                outTime: "00:00",
+                status: targetStatus,
+                statusType: "Auto",
+                inOutLogs: [],
+                workedMinutes: 0,
+                overtimeMinutes: 0,
+                adminCheckoutTime: remarks
+            });
+            updatedCount++;
+        } 
+        else {
+            // Case 2: Record hai, lekin "Absent" hai aur ab "On Leave" mil gaya
+            // (Ye aapki 10th Feb wali problem solve karega)
+            if (attendance.status === "Absent" && targetStatus === "On Leave") {
+                attendance.status = "On Leave";
+                attendance.adminCheckoutTime = remarks; // e.g. "Sick Leave"
+                await attendance.save();
+                console.log(`✅ Corrected Absent to Leave for ${dateStr}`);
+                updatedCount++;
+            }
+            // Case 3: Agar duplicate hatana ho (Optional Cleanup Logic handled separately)
+        }
+
+        loopDate.add(1, 'days');
+      }
+    }
+
+    res.json({ success: true, message: `Sync Processed. Updated/Created ${updatedCount} records.` });
+
+  } catch (err) {
+    console.error("Sync Error:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+// ... existing imports
+
+const removeDuplicates = async (req, res) => {
+  try {
+    console.log("🛠️ Controller: Starting Remove Duplicates...");
+    console.log("🏢 Controller: Received Company ID:", req.companyId);
+
+    // 1. Validation
+    if (!req.companyId) {
+        throw new Error("STOP: Company ID is undefined in Controller!");
+    }
+
+    // 2. Fetch Records
+    // Sirf wahi records lao jahan employeeId exist karta ho (Filter in DB directly)
+    const allRecords = await attendanceTbl.find({ 
+        companyId: req.companyId,
+        employeeId: { $ne: null } // MongoDB level filter to avoid nulls
+    }).sort({ createdAt: -1 });
+
+    console.log(`📊 Processing ${allRecords.length} valid records...`);
+
+    const seen = new Set();
+    const duplicateIds = [];
+
+    for (const record of allRecords) {
+      try {
+          // Extra Safety: DB filter ke baad bhi check kar lo
+          if (!record.employeeId || !record.date) continue;
+
+          // Safe Conversion
+          // Agar employeeId object hai to string banao, agar string hai to waise hi use karo
+          const empIdStr = record.employeeId.toString(); 
+          const dateStr = moment(record.date).format("YYYY-MM-DD");
+
+          const key = `${empIdStr}-${dateStr}`;
+
+          if (seen.has(key)) {
+            duplicateIds.push(record._id);
+          } else {
+            seen.add(key);
+          }
+      } catch (innerErr) {
+          console.error("⚠️ Skipping bad record:", innerErr.message);
+          continue;
+      }
+    }
+
+    // 3. Delete
+    if (duplicateIds.length > 0) {
+      await attendanceTbl.deleteMany({ _id: { $in: duplicateIds } });
+      console.log(`🗑️ Deleted ${duplicateIds.length} duplicates.`);
+    }
+
+    res.json({ success: true, message: `Cleanup done. Removed ${duplicateIds.length} duplicates.` });
+
+  } catch (err) {
+    console.error("❌ CRITICAL ERROR (removeDuplicates):", err);
+    // 500 bhejne se pehle error ka reason client ko batao
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ... existing exports
+
+
 /* ================== FILE SYSTEM SETUP ================== */
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -438,4 +623,6 @@ module.exports = {
   deleteAttendance,
   bulkMarkAttendance,
   getMonthlyAttendance,
+  syncPastAttendance ,
+  removeDuplicates,
 };

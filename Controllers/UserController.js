@@ -7,56 +7,107 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const userTbl = require("../Modals/User");
 const pendingTbl = require("../Modals/PendingUser");
 const sendOTP = require("../utils/sendOtp");
+const LeaveBalance = require("../Modals/Leave/LeaveBalance");
+const LeavePolicy = require("../Modals/Leave/LeavePolicy");
+const moment = require("moment");
 
-/* ================= REGISTER ================= */
+const initializeLeaveBalance = async (companyId, employeeId) => {
+  const currentYear = new Date().getFullYear();
+  
+  // 1. Employee ki details lao (DOJ chahiye)
+  const employee = await userTbl.findById(employeeId);
+  if (!employee) return;
+
+  const doj = moment(employee.doj); // Date of Joining
+
+  // 2. Active Policies lao
+  const policies = await LeavePolicy.find({
+    companyId,
+    isDeleted: false,
+    isActive: true,
+  });
+
+  for (const policy of policies) {
+    const exists = await LeaveBalance.findOne({
+      employeeId,
+      leaveTypeId: policy.leaveTypeId,
+      year: currentYear,
+    });
+
+    if (!exists) {
+      let initialCredit = 0;
+
+      // 🔥 LOGIC: Pro-rata Calculation for YEARLY Policies
+      if (policy.accrualType === "Yearly") {
+        
+        // Agar banda issi saal join hua hai
+        if (doj.year() === currentYear) {
+          // Total mahine jo bache hain (Join month se Dec tak)
+          // Example: Joined in Oct (Month 9). Remaining = 12 - 9 = 3 months.
+          const joinedMonth = doj.month(); // 0 = Jan, 11 = Dec
+          const remainingMonths = 12 - joinedMonth;
+          
+          // Formula: (TotalAllowed / 12) * RemainingMonths
+          const perMonthRate = policy.accrualRate / 12; // e.g. 12/12 = 1 per month
+          initialCredit = Math.round(perMonthRate * remainingMonths);
+          
+        } else {
+          // Agar banda purana hai (pichle saal ka), to Pura Credit do
+          initialCredit = policy.accrualRate; 
+        }
+      } 
+      
+      // 🔥 LOGIC: Monthly Policies start with 0 (Accrual script baad me add karegi)
+      else if (policy.accrualType === "Monthly") {
+        initialCredit = 0; 
+      }
+
+      // Create Balance Record
+      await LeaveBalance.create({
+        employeeId,
+        companyId,
+        leaveTypeId: policy.leaveTypeId,
+        year: currentYear,
+        totalCredited: initialCredit, // ✅ Calculated Value
+        used: 0,
+        carryForwarded: 0,
+        // Monthly walo ke liye lastAccruedMonth null rakho taaki cron job pick kar sake
+        lastAccruedMonth: policy.accrualType === "Monthly" ? null : moment().format("YYYY-MM") 
+      });
+      
+      console.log(`Initialized ${policy.accrualType} leave for ${employee.name}: ${initialCredit} days`);
+    }
+  }
+};
+
+
+
+
+
+/* ================= REGISTER (Direct by Admin) ================= */
 const register = async (req, res) => {
   try {
     const {
-      name,
-      email,
-      password,
-      phone,
-      gender,
-      dob,
-      address,
-      departmentId,
-      designationId,
-      shiftId,
-      doj,
-      emergencyContact,
-      pan,
-      bankAccount,
-      branchId,
-      basicSalary,
+      name, email, password, phone, gender, dob, address,
+      departmentId, designationId, shiftId, doj, emergencyContact,
+      pan, bankAccount, branchId, basicSalary,
     } = req.body;
 
-    // 🔐 Resolve company
-    const finalCompanyId =
-      req.user && req.user.role === "admin"
+    const finalCompanyId = req.user && req.user.role === "admin"
         ? req.user.companyId
         : req.body.companyId;
 
-    if (!finalCompanyId)
-      return res.status(400).json({ success: false, message: "Company required" });
+    if (!finalCompanyId) return res.status(400).json({ success: false, message: "Company required" });
+    if (!branchId) return res.status(400).json({ success: false, message: "Branch required" });
 
-    if (!branchId)
-      return res.status(400).json({ success: false, message: "Branch required" });
+    const emailExists = (await userTbl.findOne({ email })) || (await pendingTbl.findOne({ email }));
+    if (emailExists) return res.status(400).json({ success: false, message: "Email already exists" });
 
-    // ❌ Email check (both tables)
-    const emailExists =
-      (await userTbl.findOne({ email })) ||
-      (await pendingTbl.findOne({ email }));
-
-    if (emailExists)
-      return res.status(400).json({ success: false, message: "Email already exists" });
-
-    /* ================= PROFILE PIC ================= */
     let profilePic = null;
     if (req.files?.profilePic) {
       const img = req.files.profilePic;
       const uploadPath = "uploads/profiles";
       if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
-
       const filename = `${Date.now()}_${img.name}`;
       await img.mv(path.join(uploadPath, filename));
       profilePic = `profiles/${filename}`;
@@ -65,26 +116,12 @@ const register = async (req, res) => {
     /* ================= ADMIN ADDING EMPLOYEE ================= */
     if (req.user && req.user.role === "admin") {
       const passwordHash = await bcrypt.hash(password, 10);
-      console.log(req.user)
 
       const user = new userTbl({
-        name,
-        email,
-        phone,
-        gender,
-        dob,
-        address,
-        departmentId,
-        designationId,
-        shiftId,
-        doj,
-        emergencyContact: emergencyContact
-          ? JSON.parse(emergencyContact)
-          : null,
-        profilePic,
-        pan,
-        bankAccount,
-        branchId,
+        name, email, phone, gender, dob, address,
+        departmentId, designationId, shiftId, doj,
+        emergencyContact: emergencyContact ? JSON.parse(emergencyContact) : null,
+        profilePic, pan, bankAccount, branchId,
         companyId: finalCompanyId,
         passwordHash,
         role: "employee",
@@ -93,32 +130,21 @@ const register = async (req, res) => {
 
       await user.save();
 
+      // ✅ CALL HELPER FUNCTION HERE
+      await initializeLeaveBalance(user._id, finalCompanyId);
+
       return res.status(201).json({
         success: true,
-        message: "Employee added successfully",
+        message: "Employee added successfully and Leaves Assigned",
       });
     }
 
-    /* ================= PUBLIC REGISTRATION ================= */
+    /* ================= PUBLIC REGISTRATION (Pending) ================= */
     const pendingUser = new pendingTbl({
-      name,
-      email,
-      password,
-      phone,
-      gender,
-      dob,
-      address,
-      departmentId,
-      designationId,
-      shiftId,
-      doj,
-      emergencyContact: emergencyContact
-        ? JSON.parse(emergencyContact)
-        : null,
-      profilePic,
-      pan,
-      bankAccount,
-      branchId,
+      name, email, password, phone, gender, dob, address,
+      departmentId, designationId, shiftId, doj,
+      emergencyContact: emergencyContact ? JSON.parse(emergencyContact) : null,
+      profilePic, pan, bankAccount, branchId,
       companyId: finalCompanyId,
     });
 
@@ -134,6 +160,45 @@ const register = async (req, res) => {
   }
 };
 
+/* ================= APPROVE PENDING USER ================= */
+const approvePendingUser = async (req, res) => {
+  try {
+    const { basicSalary } = req.body;
+
+    if (!basicSalary) return res.status(400).json({ success: false, message: "Basic salary is required" });
+
+    const pendingUser = await pendingTbl.findOne({
+      _id: req.params.id,
+      companyId: req.companyId,
+    });
+
+    if (!pendingUser) return res.status(404).json({ success: false, message: "User not found" });
+
+    const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
+
+    const user = new userTbl({
+      ...pendingUser.toObject(),
+      passwordHash: hashedPassword,
+      role: "employee",
+      companyId: req.companyId,
+      basicSalary,
+    });
+
+    await user.save();
+    
+    // ✅ CALL HELPER FUNCTION HERE TOO
+    await initializeLeaveBalance(user._id, req.companyId);
+
+    await pendingTbl.findByIdAndDelete(req.params.id);
+
+    res.json({ success: true, message: "User approved and Leaves Assigned" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Approval failed" });
+  }
+};
+
+// ... (Rest of the controller remains exactly the same: login, getAllUsers, etc.)
+// ... Just make sure to keep the imports and the new helper function at the top.
 
 /* ================= LOGIN ================= */
 const login = async (req, res) => {
@@ -167,6 +232,7 @@ const login = async (req, res) => {
     email: user.email,
     role: user.role,
     companyId: user.companyId,
+    profilePic: user.profilePic
   },
 });
 ;
@@ -313,47 +379,6 @@ const getPendingUsers = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
-
-/* ================= APPROVE PENDING USER ================= */
-const approvePendingUser = async (req, res) => {
-  try {
-    const { basicSalary } = req.body;
-
-    if (!basicSalary) {
-      return res.status(400).json({
-        success: false,
-        message: "Basic salary is required",
-      });
-    }
-
-    const pendingUser = await pendingTbl.findOne({
-      _id: req.params.id,
-      companyId: req.companyId,
-    });
-
-    if (!pendingUser) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
-
-    const user = new userTbl({
-      ...pendingUser.toObject(),
-      passwordHash: hashedPassword,
-      role: "employee",
-      companyId: req.companyId,
-      basicSalary, // ✅ yahin add
-    });
-
-    await user.save();
-    await pendingTbl.findByIdAndDelete(req.params.id);
-
-    res.json({ success: true, message: "User approved with salary" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Approval failed" });
-  }
-};
-
 
 /* ================= REJECT PENDING USER ================= */
 const rejectPendingUser = async (req, res) => {
@@ -700,9 +725,95 @@ const googleRegister = async (req, res) => {
     res.status(500).json({ success: false, message: "Registration failed" });
   }
 };
+/* ================= GET MY PROFILE (Token Based - No Params) ================= */
+// Ye function Admin aur Employee dono use kar sakte hain apni profile dekhne ke liye
+const getMyProfile = async (req, res) => {
+  try {
+    // ID seedha Token se lo (jo Auth middleware ne set ki hai)
+    const userId = req.user._id; 
+
+    const user = await userTbl.findById(userId)
+      .select("-passwordHash")
+      .populate("departmentId", "name")
+      .populate("designationId", "name")
+      .populate("branchId", "name");
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Profile not found" });
+    }
+
+    res.json({ success: true, data: user });
+  } catch (error) {
+    console.error("Profile Fetch Error:", error);
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+/* ================= UPDATE MY PROFILE (With Email & Instant Refresh) ================= */
+const updateMyProfile = async (req, res) => {
+  try {
+    const userId = req.user._id; 
+
+    // 1. Check if user exists
+    const user = await userTbl.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // 2. Email Uniqueness Check (Agar email badal raha hai)
+    if (req.body.email && req.body.email !== user.email) {
+      const emailExists = await userTbl.findOne({ 
+          email: req.body.email, 
+          _id: { $ne: userId } // Khud ki ID chhodkar check karo
+      });
+      if (emailExists) {
+        return res.status(400).json({ success: false, message: "Email already in use by another user." });
+      }
+    }
+
+    // 3. Image Upload Logic
+    let profilePic = user.profilePic;
+    if (req.files?.profilePic) {
+      const img = req.files.profilePic;
+      const uploadPath = "uploads/profiles";
+      
+      if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
+
+      // Purani image delete karein
+      if (profilePic) {
+        const oldImg = path.join("uploads", profilePic);
+        if (fs.existsSync(oldImg)) fs.unlinkSync(oldImg);
+      }
+
+      const filename = `${Date.now()}_${img.name}`;
+      await img.mv(path.join(uploadPath, filename));
+      profilePic = `profiles/${filename}`;
+    }
+
+    // 4. Update Database
+    const updatedUser = await userTbl.findByIdAndUpdate(userId, {
+      name: req.body.name,
+      phone: req.body.phone,
+      email: req.body.email, // ✅ Email Added
+      profilePic: profilePic
+    }, { new: true }); // {new: true} se naya data wapas milta hai
+
+    // 5. Send Updated Data back to Frontend
+    res.json({ 
+        success: true, 
+        message: "Profile Updated Successfully",
+        data: updatedUser // ✅ Updated user object bheja
+    });
+
+  } catch (error) {
+    console.error("Profile Update Error:", error);
+    res.status(500).json({ success: false, message: "Update Failed" });
+  }
+};
+
 
 /* ================= EXPORT ================= */
 module.exports = {
+    getMyProfile,     // ✅ NEW
+  updateMyProfile,
   register,
   login,
   getAllUsers,

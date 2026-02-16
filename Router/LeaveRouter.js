@@ -11,6 +11,8 @@ const {
 } = require("../Controllers/LeaveController");
 const authMiddleware = require("../Middleware/auth");
 const attachCompanyContext = require("../Middleware/companyMiddleware");
+const { getMyLeaveBalance, getLeaveBalanceByEmployeeId, adjustLeaveBalance, runCarryForward} = require("../Controllers/Leave/LeaveBalanceController");
+const applyMonthlyAccrual = require("../Service/applyMonthlyAccrual");
 
 router.post(
   "/",
@@ -59,6 +61,42 @@ router.delete(
   authMiddleware,
   attachCompanyContext,
   deleteLeave
+);
+router.get("/balance/my-balance", authMiddleware, attachCompanyContext, getMyLeaveBalance);
+
+// ✅ 2. Admin checks specific employee balance (Pass ID in URL)
+router.get("/balance/employee/:employeeId", authMiddleware, attachCompanyContext, getLeaveBalanceByEmployeeId);
+
+router.put("/balance/adjust", authMiddleware, attachCompanyContext, adjustLeaveBalance);
+router.post(
+  "/carry-forward",
+  authMiddleware,
+  attachCompanyContext,
+  runCarryForward
+);
+router.post(
+  "/apply-monthly-accrual",
+  authMiddleware,
+  attachCompanyContext,
+  async (req, res) => {
+
+
+    try {
+      const { leaveTypeId } = req.body; // Frontend se aayega
+await applyMonthlyAccrual(req.companyId, leaveTypeId);
+
+      res.json({
+        success: true,
+        message: "Monthly accrual applied successfully",
+      });
+    } catch (err) {
+      console.error("Monthly Accrual Error:", err);
+      res.status(500).json({
+        success: false,
+        message: err.message,
+      });
+    }
+  }
 );
 
 

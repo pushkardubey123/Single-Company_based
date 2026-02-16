@@ -243,18 +243,178 @@ const getAllMails = async (req, res) => {
   }
 };
 
-/* ================= MY MAILS (INBOX + SENT) ================= */
+/* ================= DOWNLOAD ================= */
+const downloadAttachment = (req, res) => {
+  const filename = req.params.filename;
+  const filePath = path.join(__dirname, "..", "uploads", "mails", filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ success: false, message: "File not found" });
+  }
+
+  res.download(filePath, filename);
+};
+const saveDraft = async (req, res) => {
+  try {
+    const { to, subject, message } = req.body;
+    
+    // File upload logic (Same as sendMail)
+    const uploadDir = path.join(__dirname, "..", "uploads", "mails");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+    const attachments = [];
+    if (req.files) {
+      for (let file of Object.values(req.files)) {
+        const savePath = path.join(uploadDir, file.name);
+        await file.mv(savePath);
+        attachments.push(file.name);
+      }
+    }
+
+    // Email send nahi karna hai, sirf DB me save karna hai with isDraft: true
+    await MailModel.create({
+      companyId: req.companyId,
+      branchId: req.user.role === "admin" ? null : req.branchId,
+      sender: req.user._id,
+      recipients: Array.isArray(to) ? to : [to], // Draft me recipient optional ho sakta hai, handle frontend side
+      subject,
+      message,
+      attachments,
+      isDraft: true, // <--- Draft flag
+      trashedBy: [],
+      starredBy: [],
+      spamBy: [],
+    });
+
+    res.json({ success: true, message: "Draft saved successfully" });
+  } catch (err) {
+    console.error("Save draft error:", err);
+    res.status(500).json({ success: false, message: "Failed to save draft" });
+  }
+};
+
+/* ================= GET DRAFTS ================= */
+const getDrafts = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const drafts = await MailModel.find({
+      companyId: req.companyId,
+      sender: userId,
+      isDraft: true,
+      trashedBy: { $ne: userId },
+      permanentlyDeletedBy: { $ne: userId },
+    })
+    .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: drafts });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching drafts" });
+  }
+};
+
+/* ================= TOGGLE STAR (STAR/UNSTAR) ================= */
+const toggleStar = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const mail = await MailModel.findById(req.params.id);
+
+    if (!mail) return res.status(404).json({ success: false, message: "Mail not found" });
+
+    // Check if already starred
+    const index = mail.starredBy.indexOf(userId);
+    if (index === -1) {
+      mail.starredBy.push(userId); // Add Star
+    } else {
+      mail.starredBy.splice(index, 1); // Remove Star
+    }
+
+    await mail.save();
+    res.json({ success: true, message: "Star updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error updating star" });
+  }
+};
+
+/* ================= GET STARRED MAILS ================= */
+const getStarredMails = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const mails = await MailModel.find({
+      companyId: req.companyId,
+      starredBy: userId, // Jisme user ka ID starred array me ho
+      trashedBy: { $ne: userId },
+      permanentlyDeletedBy: { $ne: userId },
+    })
+    .populate("sender", "name email")
+    .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: mails });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching starred mails" });
+  }
+};
+
+/* ================= TOGGLE SPAM (MARK/UNMARK) ================= */
+const toggleSpam = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const mail = await MailModel.findById(req.params.id);
+
+    if (!mail) return res.status(404).json({ success: false, message: "Mail not found" });
+
+    const index = mail.spamBy.indexOf(userId);
+    if (index === -1) {
+      mail.spamBy.push(userId); // Mark as Spam
+    } else {
+      mail.spamBy.splice(index, 1); // Unmark Spam
+    }
+
+    await mail.save();
+    res.json({ success: true, message: "Spam status updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error updating spam" });
+  }
+};
+
+/* ================= GET SPAM MAILS ================= */
+const getSpamMails = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const mails = await MailModel.find({
+      companyId: req.companyId,
+      spamBy: userId,
+      trashedBy: { $ne: userId },
+      permanentlyDeletedBy: { $ne: userId },
+    })
+    .populate("sender", "name email")
+    .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: mails });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching spam" });
+  }
+};
+
+/* ================= UPDATE: MY MAILS (INBOX) ================= */
+// Isko update karna zaruri hai taaki Inbox me Drafts aur Spam NA dikhein
 const getMyMails = async (req, res) => {
   try {
     const userId = req.user._id;
+    const userEmail = req.user.email;
 
     const filter = {
       companyId: req.companyId,
       trashedBy: { $ne: userId },
       permanentlyDeletedBy: { $ne: userId },
+      spamBy: { $ne: userId }, // Spam inbox me nahi dikhna chahiye
+      isDraft: false,          // Drafts inbox me nahi dikhna chahiye
+      
       $or: [
         { sender: userId },
-        { recipients: { $in: [req.user.email] } },
+        { recipients: { $in: [userEmail] } },
       ],
     };
 
@@ -267,20 +427,8 @@ const getMyMails = async (req, res) => {
     res.status(500).json({ success: false });
   }
 };
-
-/* ================= DOWNLOAD ================= */
-const downloadAttachment = (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(__dirname, "..", "uploads", "mails", filename);
-
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ success: false, message: "File not found" });
-  }
-
-  res.download(filePath, filename);
-};
-
 module.exports = {
+  // ... Purane exports ...
   sendMail,
   getAllMails,
   getMyMails,
@@ -290,4 +438,12 @@ module.exports = {
   moveToTrash,
   restoreMail,
   getAllUsers,
+  
+  // ... New exports ...
+  saveDraft,
+  getDrafts,
+  toggleStar,
+  getStarredMails,
+  toggleSpam,
+  getSpamMails
 };

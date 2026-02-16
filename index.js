@@ -5,6 +5,7 @@ const fileupload = require("express-fileupload");
 const cors = require("cors");
 const path = require("path");
 const timesheetRoutes = require("./Router/timesheetRoutes");
+const holidayRoutes = require("./Router/Leave/holiday.routes");
 dotenv.config();
 const app = express();
 
@@ -21,6 +22,8 @@ app.use(
 );
 
 dbConnect();
+require("./utils/taskDeadlineNotifier")();
+require("./utils/birthdayAnniversaryNotifier")();
 app.use(express.json());
 
 app.use(
@@ -52,13 +55,15 @@ app.use("/api/timesheet", timesheetRoutes);
 app.use("/api/events", require("./Router/eventRoutes"));
 app.use("/api/meeting", require("./Router/meetingRoutes"));
 app.use("/api/jobs", require("./Router/jobRoutes"));
-require("./utils/taskDeadlineNotifier")();
-require("./utils/birthdayAnniversaryNotifier")();
 app.use("/api", require("./Router/branchRoutes"));
 app.use("/api/leads", require("./Router/leadRoutes"));
 app.use("/api/settings", require("./Router/companySettings"));
 app.use("/api/officetimming", require("./Router/officeTimingRoutes"));
 require("./utils/autoAbsent")();
+app.use("/api/leave-types", require("./Router/Leave/LeaveTypeRouter"));
+app.use("/api/leave-policies", require("./Router/Leave/leavePolicyRoutes"));
+app.use("/api/holidays", holidayRoutes);
+
 
 const PORT = process.env.PORT || 3003;
 app.listen(PORT, () => {

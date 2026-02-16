@@ -13,6 +13,8 @@ const {
   bulkMarkAttendance,
   getMonthlyAttendance,
   adminApproveAction,
+  syncPastAttendance,
+  removeDuplicates
 } = require("../Controllers/AttendenceController");
 
 // 🔐 AUTH REQUIRED
@@ -23,9 +25,11 @@ router.post("/session", auth,attachCompanyId, markSession);
 router.get("/", auth, attachCompanyId, getAllAttendance);
 router.get("/employee/:id", auth, attachCompanyId, getAttendanceByEmployee);
 router.put("/approve-action", auth, attachCompanyId, adminApproveAction);
-router.put("/:id", auth, attachCompanyId, updateAttendance);
-router.delete("/:id", auth, attachCompanyId, deleteAttendance);
+router.put("/:id", auth, attachCompanyId, updateAttendance)
 router.post("/bulk", auth, attachCompanyId, bulkMarkAttendance);
 router.get("/monthly", auth, attachCompanyId, getMonthlyAttendance);
-
+router.post("/sync", auth, attachCompanyId, syncPastAttendance);
+// ✅ CORRECT: Specific routes first, dynamic routes last
+router.delete("/remove-duplicates", auth, attachCompanyId, removeDuplicates);
+router.delete("/:id", auth, attachCompanyId, deleteAttendance);
 module.exports = router;

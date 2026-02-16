@@ -22,11 +22,19 @@ const leaveSchema = new mongoose.Schema(
       index: true,
     },
 
+// ... inside your existing Leave Schema ...
     leaveType: {
-      type: String,
-      enum: ["Casual", "Sick", "Earned"],
+      type: String, 
       required: true,
+      // REMOVE the enum line: enum: ["Casual", "Sick", "Earned"], 
+      // We will now accept strings that match the company's active leave types
     },
+    // Optional: You can also store the leaveTypeId for stricter linking
+    leaveTypeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "LeaveType"
+    },
+// ... rest of the schema
     startDate: Date,
     endDate: Date,
     reason: String,

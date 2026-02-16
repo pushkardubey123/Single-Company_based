@@ -18,6 +18,8 @@ const {
   googleLogin,
   googleRegister,
   googleAuthCheck,
+  getMyProfile,
+  updateMyProfile
 } = require("../Controllers/UserController");
 
 const auth = require("../Middleware/auth");
@@ -26,6 +28,8 @@ const userTbl = require("../Modals/User");
 
 router.post("/user/register", register);
 router.post("/user/login", login);
+router.get("/user/profile", auth, getMyProfile); 
+router.put("/user/profile", auth, updateMyProfile);
 router.post("/user/google-login", googleLogin);
 router.post("/user/google-auth-check", googleAuthCheck);
 router.post("/user/google-register", googleRegister);
