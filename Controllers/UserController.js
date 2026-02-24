@@ -18,9 +18,8 @@ const initializeLeaveBalance = async (companyId, employeeId) => {
   const employee = await userTbl.findById(employeeId);
   if (!employee) return;
 
-  const doj = moment(employee.doj); // Date of Joining
+  const doj = moment(employee.doj); 
 
-  // 2. Active Policies lao
   const policies = await LeavePolicy.find({
     companyId,
     isDeleted: false,

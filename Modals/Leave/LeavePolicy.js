@@ -23,7 +23,7 @@ const leavePolicySchema = new mongoose.Schema(
     // Accrual configuration
     accrualType: {
       type: String,
-      enum: ["Monthly", "Yearly"],
+      enum: ["Monthly"],
       required: true,
     },
 
@@ -32,12 +32,6 @@ const leavePolicySchema = new mongoose.Schema(
      * Yearly   => total credit per year
      */
     accrualRate: {
-      type: Number,
-      required: true,
-    },
-
-    // 🔒 Prevent unlimited accrual
-    maxPerYear: {
       type: Number,
       required: true,
     },

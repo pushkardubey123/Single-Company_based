@@ -1,11 +1,13 @@
 const leaveTbl = require("../Modals/Leave");
 const moment = require("moment");
-const mongoose = require("mongoose"); // ✅ Required for ObjectId casting
+const mongoose = require("mongoose");
 const LeaveBalance = require("../Modals/Leave/LeaveBalance");
 const LeaveType = require("../Modals/Leave/LeaveType");
 const Leave = require("../Modals/Leave");
 const Holiday = require("../Modals/Leave/Holiday");
 const LeaveSettings = require("../Modals/Leave/LeaveSettings");
+const User = require("../Modals/User"); // ✅ Need this to fetch emails
+const sendEmail = require("../utils/sendEmail"); // ✅ Import Email Utility
 
 
 const getLeaveReport = async (req, res) => {
@@ -24,19 +26,14 @@ const getLeaveReport = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid type" });
     }
 
-    // ✅ FIX 1: Ensure CompanyId is ObjectId
     const companyIdObject = new mongoose.Types.ObjectId(req.companyId);
 
-    // ✅ FIX 2: Better Logic (Leaves jo is mahine ACTIVE thin, na ki bas start hui thin)
-    // Agar leave Dec 25 ko start hui aur Jan 5 ko khatam hui, to wo Jan ki report me dikhni chahiye.
-    // Logic: (LeaveStart <= MonthEnd) AND (LeaveEnd >= MonthStart)
     const filter = {
       companyId: companyIdObject,
-      startDate: { $lte: end }, // Start date month end se pehle honi chahiye
-      endDate: { $gte: start }  // End date month start ke baad honi chahiye
+      startDate: { $lte: end },
+      endDate: { $gte: start } 
     };
 
-    // Branch Filter (Only if not Admin)
     if (req.user.role !== 'admin' && req.user.branchId) {
       filter.branchId = req.user.branchId;
     }
@@ -45,7 +42,6 @@ const getLeaveReport = async (req, res) => {
       .find(filter)
       .populate("employeeId", "name email profileImage role")
       .sort({ startDate: -1 });
-
 
     res.json({
       success: true,
@@ -56,77 +52,58 @@ const getLeaveReport = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-;
 
 /**
  * Calculates effective leave days excluding Weekends and Holidays
  */
-
 const calculateLeaveDays = async (startDate, endDate, companyId) => {
-  const start = moment(startDate);
-  const end = moment(endDate);
+  const start = moment(startDate).startOf('day');
+  const queryEnd = moment(endDate).endOf('day'); 
+  const loopEnd = moment(endDate).startOf('day');
   
-  if (end.isBefore(start)) throw new Error("End date cannot be before start date");
+  if (loopEnd.isBefore(start)) throw new Error("End date cannot be before start date");
 
-  // 1. Settings lao (Saturday/Sunday Off hai ya nahi?)
   let settings = await LeaveSettings.findOne({ companyId });
   if (!settings) settings = { isSaturdayOff: true, isSundayOff: true };
 
-  // 2. Holidays lao jo is range ke beech me pad rahe hain
-  // Example: Agar Holiday 12-13 ko hai, aur Leave 11-14 hai, to wo holiday yahan fetch hoga.
   const holidays = await Holiday.find({
     companyId,
-    $or: [
-      { startDate: { $lte: end.toDate() }, endDate: { $gte: start.toDate() } }
-    ]
+    startDate: { $lte: queryEnd.toDate() },
+    endDate: { $gte: start.toDate() }
   });
 
   let effectiveDays = 0;
   let currentDate = start.clone();
 
-  // 3. Loop: Har ek din check karo (11, 12, 13, 14...)
-  while (currentDate.isSameOrBefore(end)) {
-    const dayOfWeek = currentDate.day(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const currentDateStr = currentDate.format("YYYY-MM-DD"); // Date ko string bana lo comparison ke liye
+  while (currentDate.isSameOrBefore(loopEnd)) {
+    const dayOfWeek = currentDate.day(); 
+    let isOff = false; 
 
-    let isOff = false; // Maan ke chalo aaj chutti nahi hai
+    if (dayOfWeek === 0 && settings.isSundayOff) isOff = true; 
+    if (dayOfWeek === 6 && settings.isSaturdayOff) isOff = true; 
 
-    // --- A. Weekend Check ---
-    if (dayOfWeek === 0 && settings.isSundayOff) isOff = true; // Agar Sunday hai aur off hai -> Skip
-    if (dayOfWeek === 6 && settings.isSaturdayOff) isOff = true; // Agar Saturday hai aur off hai -> Skip
-
-    // --- B. Holiday Check ---
-    // Agar Weekend nahi tha, to check karo kya aaj Holiday hai?
     if (!isOff) {
       const isHoliday = holidays.some(h => {
-        const hStart = moment(h.startDate).format("YYYY-MM-DD");
-        const hEnd = moment(h.endDate).format("YYYY-MM-DD");
-        // Check karo ki current date holiday range ke beech me hai kya
-        return currentDateStr >= hStart && currentDateStr <= hEnd;
+        const hStart = moment(h.startDate).startOf('day');
+        const hEnd = moment(h.endDate).startOf('day');
+        return currentDate.isSameOrAfter(hStart) && currentDate.isSameOrBefore(hEnd);
       });
-
-      if (isHoliday) isOff = true; // Agar Holiday list me mil gaya -> Skip
+      if (isHoliday) isOff = true; 
     }
 
-    // --- C. Result Calculation ---
     if (!isOff) {
-      // ✅ Agar na Weekend hai, na Holiday hai, tabhi count badhao
       effectiveDays++;
-    } else {
-      // ❌ Agar Weekend ya Holiday hai, to yahan count nahi badhega (Minus ho gaya)
-      console.log(`Skipping ${currentDateStr} (Weekend/Holiday)`);
     }
 
-    // Agla din check karo
     currentDate.add(1, "days");
   }
 
   return effectiveDays;
 };
 
-// ... createLeave aur updateLeaveStatus function wahi rahenge ...
-// Bas ensure karein ki createLeave me ye function call ho raha ho:
-
+// ==========================================
+// 1. APPLY LEAVE (Sends email to ADMIN)
+// ==========================================
 const createLeave = async (req, res) => {
   try {
     const { leaveTypeId, startDate, endDate, reason } = req.body;
@@ -135,20 +112,14 @@ const createLeave = async (req, res) => {
 
     if (!startDate || !endDate) return res.status(400).json({ success: false, message: "Dates required" });
 
-    // 1. Calculate Days (Using the logic above)
-    // Example: User ne 11 se 14 dala. Function ne 12, 13 (Holidays) ko skip kiya.
-    // Result: effectiveDays = 2 ayega.
     const effectiveDays = await calculateLeaveDays(startDate, endDate, companyId);
-
     if (effectiveDays === 0) {
       return res.status(400).json({ success: false, message: "Selected dates are all holidays or weekends." });
     }
 
-    // 2. Validate Leave Type
     const leaveTypeDoc = await LeaveType.findById(leaveTypeId);
     if (!leaveTypeDoc) return res.status(404).json({ success: false, message: "Invalid Leave Type" });
 
-    // 3. Balance Check Logic (Aapka existing code)
     const year = new Date(startDate).getFullYear();
     const balance = await LeaveBalance.findOne({ employeeId, leaveTypeId, year });
 
@@ -163,7 +134,6 @@ const createLeave = async (req, res) => {
         });
     }
 
-    // 4. Save Leave
     const leave = await Leave.create({
       employeeId,
       companyId,
@@ -173,9 +143,59 @@ const createLeave = async (req, res) => {
       startDate,
       endDate,
       reason,
-      days: effectiveDays, // ✅ Database me sirf 2 din save honge
+      days: effectiveDays,
       status: "Pending"
     });
+
+    // 🔥 SEND EMAIL TO ADMIN IN BACKGROUND
+    try {
+        const [adminUser, employeeUser] = await Promise.all([
+            User.findById(companyId), // admin is typically the companyId
+            User.findById(employeeId)
+        ]);
+
+        if (adminUser && adminUser.email) {
+            const adminHtml = `
+                <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                    <div style="background-color: #4f46e5; padding: 15px; color: #fff; text-align: center;">
+                        <h2 style="margin: 0;">New Leave Request</h2>
+                    </div>
+                    <div style="padding: 20px;">
+                        <p>Dear Admin,</p>
+                        <p>A new leave request has been submitted by <strong>${employeeUser.name}</strong> and is pending your approval.</p>
+                        
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold; width: 35%;">Employee Name</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${employeeUser.name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Leave Type</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${leaveTypeDoc.name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Duration</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${moment(startDate).format("DD MMM YYYY")} to ${moment(endDate).format("DD MMM YYYY")}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Total Days</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;"><strong>${effectiveDays} Days</strong></td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Reason</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${reason || "Not Provided"}</td>
+                            </tr>
+                        </table>
+                        <p style="margin-top: 20px;">Please login to your admin portal to review and take action.</p>
+                    </div>
+                </div>
+            `;
+            // Fire & forget mail
+            sendEmail(adminUser.email, `Leave Request: ${employeeUser.name}`, adminHtml).catch(e => console.error("Admin Email Error", e));
+        }
+    } catch (mailError) {
+        console.error("Failed to send admin email:", mailError);
+    }
 
     res.status(201).json({ success: true, message: "Leave Applied", data: leave });
 
@@ -185,21 +205,22 @@ const createLeave = async (req, res) => {
   }
 };
 
+// ==========================================
+// 2. UPDATE LEAVE (Sends email to EMPLOYEE)
+// ==========================================
 const updateLeaveStatus = async (req, res) => {
   try {
-    const { status } = req.body; // "Approved" or "Rejected"
+    const { status } = req.body; 
     const leaveId = req.params.id;
 
-    // 1. Leave Dhundo
-    const leave = await Leave.findById(leaveId);
+    // 🔥 Added populate to get employee email
+    const leave = await Leave.findById(leaveId).populate("employeeId", "name email");
     if (!leave) return res.status(404).json({ message: "Leave not found" });
 
-    // Agar status change nahi ho raha, to wapas bhej do
     if (leave.status === status) {
       return res.json({ success: true, message: "Status updated" });
     }
 
-    // 2. Days Calculation (Agar database me save nahi hua tha)
     let leaveDays = leave.days;
     if (!leaveDays) {
       const s = moment(leave.startDate);
@@ -213,22 +234,16 @@ const updateLeaveStatus = async (req, res) => {
     // SCENARIO A: APPROVE (Balance Kato)
     // ===============================================
     if (status === "Approved" && leave.status !== "Approved") {
-      
-      // Balance check karo
       const balance = await LeaveBalance.findOne({
-        employeeId: leave.employeeId,
+        employeeId: leave.employeeId._id, // Now it's an object because of populate
         leaveTypeId: leave.leaveTypeId,
         year: year
       });
 
-      if (!balance) {
-        return res.status(400).json({ success: false, message: "Leave Balance not found for this user." });
-      }
+      if (!balance) return res.status(400).json({ success: false, message: "Leave Balance not found for this user." });
 
-      // Available calculate karo
       const available = (balance.totalCredited || 0) + (balance.carryForwarded || 0) - (balance.used || 0);
 
-      // Agar balance kam hai to error do
       if (leaveDays > available) {
         return res.status(400).json({ 
             success: false, 
@@ -236,7 +251,6 @@ const updateLeaveStatus = async (req, res) => {
         });
       }
 
-      // Balance Update (Used Badhao)
       await LeaveBalance.findOneAndUpdate(
         { _id: balance._id },
         { $inc: { used: leaveDays } }
@@ -249,18 +263,60 @@ const updateLeaveStatus = async (req, res) => {
     if (status === "Rejected" && leave.status === "Approved") {
       await LeaveBalance.findOneAndUpdate(
         { 
-            employeeId: leave.employeeId, 
+            employeeId: leave.employeeId._id, 
             leaveTypeId: leave.leaveTypeId, 
             year: year 
         },
-        { $inc: { used: -leaveDays } } // Used ghata do (wapas mil jayega)
+        { $inc: { used: -leaveDays } } 
       );
     }
 
-    // 3. Final Status Save
+    // Final Status Save
     leave.status = status;
-    if (!leave.days) leave.days = leaveDays; // Save days for future reference
+    if (!leave.days) leave.days = leaveDays;
     await leave.save();
+
+    // 🔥 SEND EMAIL TO EMPLOYEE IN BACKGROUND
+    try {
+        if (leave.employeeId && leave.employeeId.email) {
+            const statusColor = status === "Approved" ? "#10b981" : "#ef4444"; // Green for Approved, Red for Rejected
+            const empHtml = `
+                <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                    <div style="background-color: ${statusColor}; padding: 15px; color: #fff; text-align: center;">
+                        <h2 style="margin: 0;">Leave Request ${status}</h2>
+                    </div>
+                    <div style="padding: 20px;">
+                        <p>Dear <strong>${leave.employeeId.name}</strong>,</p>
+                        <p>This is to inform you that your recent leave request has been <strong>${status.toUpperCase()}</strong> by the management.</p>
+                        
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold; width: 35%;">Leave Type</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${leave.leaveType}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Duration</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${moment(leave.startDate).format("DD MMM YYYY")} to ${moment(leave.endDate).format("DD MMM YYYY")}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Total Days</td>
+                                <td style="padding: 10px; border: 1px solid #ddd;">${leaveDays} Days</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px; border: 1px solid #ddd; background: #f8fafc; font-weight: bold;">Final Status</td>
+                                <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; color: ${statusColor};">${status}</td>
+                            </tr>
+                        </table>
+                        <p style="margin-top: 20px;">If you have any questions, please contact the HR department.</p>
+                    </div>
+                </div>
+            `;
+            // Fire & forget mail
+            sendEmail(leave.employeeId.email, `Leave Update: ${status}`, empHtml).catch(e => console.error("Employee Email Error", e));
+        }
+    } catch (mailError) {
+        console.error("Failed to send employee email:", mailError);
+    }
 
     res.json({ success: true, message: `Leave ${status} successfully`, data: leave });
 
@@ -271,29 +327,21 @@ const updateLeaveStatus = async (req, res) => {
 };
 
 
-// ... Baaki functions same rahenge (getAllLeaves, getLeaveById etc.) ...
-
-
-
 const getAllLeaves = async (req, res) => {
   try {
     const filter = {
-  companyId: req.companyId,
-};
+      companyId: req.companyId,
+    };
 
-if (req.user.role !== "admin") {
-  filter.branchId = req.user.branchId;
-}
+    if (req.user.role !== "admin") {
+      filter.branchId = req.user.branchId;
+    }
 
-const data = await leaveTbl
-  .find(filter)
-  .populate("employeeId", "name email");
+    const data = await leaveTbl
+      .find(filter)
+      .populate("employeeId", "name email");
 
-
-    res.json({
-      success: true,
-      data,
-    });
+    res.json({ success: true, data });
   } catch {
     res.status(500).json({ success: false });
   }
@@ -306,7 +354,6 @@ const getLeavesByEmployee = async (req, res) => {
       companyId: req.companyId 
     };
 
-    // Agar user admin nahi hai, tabhi branch ka filter lagao
     if (req.user.role !== 'admin') {
       filter.branchId = req.user.branchId;
     }
@@ -337,7 +384,6 @@ const getLeaveById = async (req, res) => {
     res.status(500).json({ success: false });
   }
 };
-
 
 const deleteLeave = async (req, res) => {
   try {

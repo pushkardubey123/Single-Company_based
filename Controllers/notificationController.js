@@ -6,6 +6,7 @@ const Exit = require("../Modals/ExitRequest");
 const mongoose = require("mongoose");
 const fs = require("fs");
 const path = require("path");
+const sendEmail = require("../utils/sendEmail"); // ✅ Import Email Utility
 
 /* ================= ADMIN ALERTS ================= */
 exports.getAdminAlerts = async (req, res) => {
@@ -61,7 +62,6 @@ exports.getEmployeeNotifications = async (req, res) => {
   }
 };
 
-
 /* ================= ADMIN ALL ================= */
 exports.getAllNotification = async (req, res) => {
   try {
@@ -80,7 +80,41 @@ exports.getAllNotification = async (req, res) => {
   }
 };
 
-/* ================= SEND CUSTOM ================= */
+/* ================= HELPER: EMAIL HTML GENERATOR ================= */
+// Premium Mobile Responsive Email Template
+const generateNotificationEmailHtml = (title, message, empName) => {
+  return `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7fe; padding: 30px 15px; margin: 0;">
+      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+        
+        <div style="background-color: #4f46e5; padding: 25px 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;">
+            New Company Announcement
+          </h2>
+        </div>
+        
+        <div style="padding: 30px 25px; color: #334155;">
+          <p style="font-size: 16px; margin-top: 0;">Dear <strong>${empName}</strong>,</p>
+          <p style="font-size: 15px; line-height: 1.6; margin-bottom: 25px;">You have received a new official notification from the administration.</p>
+          
+          <div style="background-color: #f8fafc; border-left: 4px solid #6366f1; padding: 20px; border-radius: 4px; margin-bottom: 25px;">
+            <h3 style="margin: 0 0 10px 0; font-size: 17px; color: #0f172a;">${title}</h3>
+            <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #475569; white-space: pre-wrap;">${message}</p>
+          </div>
+          
+          <p style="font-size: 14px; color: #64748b; margin-bottom: 5px;">Please log in to your employee portal to view more details.</p>
+        </div>
+        
+        <div style="background-color: #f1f5f9; padding: 15px; text-align: center; border-top: 1px solid #e2e8f0;">
+          <p style="margin: 0; font-size: 12px; color: #94a3b8;">This is an automated message. Please do not reply directly to this email.</p>
+        </div>
+
+      </div>
+    </div>
+  `;
+};
+
+/* ================= SEND CUSTOM NOTIFICATION (+ EMAIL) ================= */
 exports.sendCustomNotification = async (req, res) => {
   try {
     const { title, message, recipient, type } = req.body;
@@ -92,27 +126,26 @@ exports.sendCustomNotification = async (req, res) => {
 
     let imageUrl = "";
 
-if (req.files && req.files.image) {
-  // If single file, it can be object; if multiple, it can be array
-  const imageFile = Array.isArray(req.files.image)
-    ? req.files.image[0]
-    : req.files.image;
+    if (req.files && req.files.image) {
+      const imageFile = Array.isArray(req.files.image)
+        ? req.files.image[0]
+        : req.files.image;
 
-  const uploadDir = path.join(__dirname, "..", "uploads", "notifications");
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      const uploadDir = path.join(__dirname, "..", "uploads", "notifications");
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-  const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, "_")}`;
-  await imageFile.mv(path.join(uploadDir, fileName));
-  imageUrl = `notifications/${fileName}`;
-}
-
+      const fileName = `${Date.now()}_${imageFile.name.replace(/\s/g, "_")}`;
+      await imageFile.mv(path.join(uploadDir, fileName));
+      imageUrl = `notifications/${fileName}`;
+    }
 
     /* 🔔 ALL EMPLOYEES */
     if (recipient === "all") {
       const userQuery = { companyId, role: "employee" };
       if (branchId) userQuery.branchId = branchId;
 
-      const employees = await User.find(userQuery, "_id");
+      // ✅ Fetch full user details to get email and name
+      const employees = await User.find(userQuery, "_id name email");
 
       const notifications = employees.map((emp) => ({
         companyId,
@@ -126,13 +159,21 @@ if (req.files && req.files.image) {
 
       await Notification.insertMany(notifications);
 
+      // 🔥 Send Mass Emails asynchronously (Non-blocking)
+      employees.forEach(emp => {
+        if (emp.email) {
+          const htmlContent = generateNotificationEmailHtml(title, message, emp.name);
+          sendEmail(emp.email, `Alert: ${title}`, htmlContent).catch(e => console.error("Mass Email Error", e));
+        }
+      });
+
       return res.json({
         success: true,
         message: `Notification sent to ${employees.length} employees`,
       });
     }
 
-    /* 🔔 SINGLE */
+    /* 🔔 SINGLE EMPLOYEE */
     if (!mongoose.Types.ObjectId.isValid(recipient)) {
       return res.status(400).json({ message: "Invalid recipient" });
     }
@@ -146,6 +187,17 @@ if (req.files && req.files.image) {
       type: type || "custom",
       image: imageUrl || undefined,
     });
+
+    // 🔥 Send Single Email asynchronously
+    try {
+      const emp = await User.findById(recipient, "name email");
+      if (emp && emp.email) {
+        const htmlContent = generateNotificationEmailHtml(title, message, emp.name);
+        sendEmail(emp.email, `Alert: ${title}`, htmlContent).catch(e => console.error("Single Email Error", e));
+      }
+    } catch (e) {
+      console.error("Failed to trigger email:", e);
+    }
 
     res.json({ success: true, notification });
   } catch (err) {
@@ -170,7 +222,6 @@ exports.getMyNotifications = async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch notifications" });
   }
 };
-
 
 /* ================= READ ================= */
 exports.markAsRead = async (req, res) => {
