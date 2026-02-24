@@ -173,11 +173,15 @@ const approvePendingUser = async (req, res) => {
 
     if (!pendingUser) return res.status(404).json({ success: false, message: "User not found" });
 
-    const hashedPassword = await bcrypt.hash(pendingUser.password, 10);
+    // ✅ FIX: Hash the password ONLY if it exists (Google users won't have it)
+    let hashedPassword = undefined;
+    if (pendingUser.password) {
+      hashedPassword = await bcrypt.hash(pendingUser.password, 10);
+    }
 
     const user = new userTbl({
       ...pendingUser.toObject(),
-      passwordHash: hashedPassword,
+      passwordHash: hashedPassword, 
       role: "employee",
       companyId: req.companyId,
       basicSalary,
@@ -192,6 +196,7 @@ const approvePendingUser = async (req, res) => {
 
     res.json({ success: true, message: "User approved and Leaves Assigned" });
   } catch (err) {
+    console.error("Approve Error:", err); // Ye console.log error details dekhne me madad karega
     res.status(500).json({ success: false, message: "Approval failed" });
   }
 };
@@ -748,7 +753,7 @@ const getMyProfile = async (req, res) => {
   }
 };
 
-/* ================= UPDATE MY PROFILE (With Email & Instant Refresh) ================= */
+/* ================= UPDATE MY PROFILE (With Email, Password & Instant Refresh) ================= */
 const updateMyProfile = async (req, res) => {
   try {
     const userId = req.user._id; 
@@ -757,11 +762,11 @@ const updateMyProfile = async (req, res) => {
     const user = await userTbl.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    // 2. Email Uniqueness Check (Agar email badal raha hai)
+    // 2. Email Uniqueness Check
     if (req.body.email && req.body.email !== user.email) {
       const emailExists = await userTbl.findOne({ 
           email: req.body.email, 
-          _id: { $ne: userId } // Khud ki ID chhodkar check karo
+          _id: { $ne: userId } 
       });
       if (emailExists) {
         return res.status(400).json({ success: false, message: "Email already in use by another user." });
@@ -776,7 +781,6 @@ const updateMyProfile = async (req, res) => {
       
       if (!fs.existsSync(uploadPath)) fs.mkdirSync(uploadPath, { recursive: true });
 
-      // Purani image delete karein
       if (profilePic) {
         const oldImg = path.join("uploads", profilePic);
         if (fs.existsSync(oldImg)) fs.unlinkSync(oldImg);
@@ -787,19 +791,28 @@ const updateMyProfile = async (req, res) => {
       profilePic = `profiles/${filename}`;
     }
 
-    // 4. Update Database
-    const updatedUser = await userTbl.findByIdAndUpdate(userId, {
+    // 4. Prepare Update Data
+    const updateData = {
       name: req.body.name,
       phone: req.body.phone,
-      email: req.body.email, // ✅ Email Added
+      email: req.body.email, 
       profilePic: profilePic
-    }, { new: true }); // {new: true} se naya data wapas milta hai
+    };
 
-    // 5. Send Updated Data back to Frontend
+    // NEW: Hash and update password if provided
+    if (req.body.password) {
+      const bcrypt = require("bcryptjs");
+      updateData.passwordHash = await bcrypt.hash(req.body.password, 10);
+    }
+
+    // 5. Update Database
+    const updatedUser = await userTbl.findByIdAndUpdate(userId, updateData, { new: true });
+
+    // 6. Send Updated Data back to Frontend
     res.json({ 
         success: true, 
         message: "Profile Updated Successfully",
-        data: updatedUser // ✅ Updated user object bheja
+        data: updatedUser 
     });
 
   } catch (error) {
@@ -807,7 +820,6 @@ const updateMyProfile = async (req, res) => {
     res.status(500).json({ success: false, message: "Update Failed" });
   }
 };
-
 
 /* ================= EXPORT ================= */
 module.exports = {

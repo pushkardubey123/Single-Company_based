@@ -10,6 +10,11 @@ const PendingUserSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   phone: String,
   password: String,
+  
+  // ✅ NEW FIELDS ADDED: Iske bina Mongoose data strip kar dega
+  authProvider: { type: String, default: "local" },
+  googleId: { type: String },
+
   gender: String,
   dob: Date,
   address: String,
