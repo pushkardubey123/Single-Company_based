@@ -1,37 +1,35 @@
+require("dotenv").config(); // Yeh line sabse upar add karein
 const nodemailer = require("nodemailer");
 
-const sendEmail = async (to, subject, html, attachments = []) => {
-  try {
-    const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true, // 465 ke liye true
-      pool: true,   // Connection drops ko bypass karne ke liye
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // Aapka 16-digit App Password
-      },
-      tls: {
-        rejectUnauthorized: false // Cloud server ke SSL/TLS block ko bypass karne ke liye
-      }
-    });
+// Ye check karne ke liye ki password aa raha hai ya nahi (Testing ke liye)
+console.log("SMTP USER:", process.env.SMTP_USER); 
+console.log("SMTP PASS:", process.env.SMTP_PASS ? "Loaded" : "Not Loaded");
 
+const transporter = nodemailer.createTransport({
+  host: 'smtp-relay.brevo.com',
+  port: 587,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  }
+});
+// ... baaki ka code same rahega
+const sendEmail = async (to, subject, html) => {
+  try {
+    // Screenshot 1 wala setup (Mail Options)
     const mailOptions = {
-      from: `"HRMS App" <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html,
-      attachments,
+      from: process.env.SENDER_EMAIL, // .env se sender email aayega
+      to: to,
+      subject: subject,
+      html: html, // Hum HTML bhej rahe hain kyunki aapka meeting template HTML hai
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`Email successfully sent to ${to}, Message ID: ${info.messageId}`);
-    return info;
+    console.log(`✅ Email successfully sent to ${to} (Message ID: ${info.messageId})`);
     
-  } catch (err) {
-    console.error("Email send error (Nodemailer):", err.message);
-    // Error throw kar rahe hain taaki logs mein poora trace dikhe
-    throw err; 
+  } catch (error) {
+    console.error("❌ Email send error:", error.message);
+    throw error;
   }
 };
 
