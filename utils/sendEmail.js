@@ -12,7 +12,7 @@ const sendEmail = async (
       service: "gmail", // Seedha Gmail service use karein
       host: "smtp.gmail.com",
       port: 465, // 465 port Render par safely kaam karta hai
-      secure: true, // Port 465 ke liye ye true hona zaroori hai
+      secure: false, // Port 465 ke liye ye true hona zaroori hai
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS, // Dhyan rahe ye 16-digit App Password ho
