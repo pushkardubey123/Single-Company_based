@@ -11,7 +11,7 @@ const sendEmail = async (
     const transporter = nodemailer.createTransport({
       service: "gmail", // Seedha Gmail service use karein
       host: "smtp.gmail.com",
-      port: 465, // 465 port Render par safely kaam karta hai
+      port: 443, // 465 port Render par safely kaam karta hai
       secure: false, // Port 465 ke liye ye true hona zaroori hai
       auth: {
         user: process.env.EMAIL_USER,
