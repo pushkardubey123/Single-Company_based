@@ -1,4 +1,4 @@
-const attendanceTbl = require("../Modals/Attendence");
+const attendanceTbl = require("../Modals/Attendance");
 const { getDistance } = require("geolib");
 const moment = require("moment-timezone"); 
 const verifyFacePython = require("../utils/faceVerify.py-api");
@@ -11,7 +11,7 @@ const fs = require("fs");
 const path = require("path");
 
 const Leave = require("../Modals/Leave");
-const Holiday = require("../Modals/Leave/Holiday");
+const Holiday = require("../Modals/Leave/Holiday"); 
 const LeaveSettings = require("../Modals/Leave/LeaveSettings");
 
 const syncPastAttendance = async (req, res) => {
@@ -116,7 +116,6 @@ const syncPastAttendance = async (req, res) => {
                 console.log(`✅ Corrected Absent to Leave for ${dateStr}`);
                 updatedCount++;
             }
-            // Case 3: Agar duplicate hatana ho (Optional Cleanup Logic handled separately)
         }
 
         loopDate.add(1, 'days');
@@ -134,8 +133,7 @@ const syncPastAttendance = async (req, res) => {
 
 const removeDuplicates = async (req, res) => {
   try {
-    console.log("🛠️ Controller: Starting Remove Duplicates...");
-    console.log("🏢 Controller: Received Company ID:", req.companyId);
+   
 
     // 1. Validation
     if (!req.companyId) {
@@ -149,18 +147,13 @@ const removeDuplicates = async (req, res) => {
         employeeId: { $ne: null } // MongoDB level filter to avoid nulls
     }).sort({ createdAt: -1 });
 
-    console.log(`📊 Processing ${allRecords.length} valid records...`);
-
     const seen = new Set();
     const duplicateIds = [];
 
     for (const record of allRecords) {
       try {
-          // Extra Safety: DB filter ke baad bhi check kar lo
           if (!record.employeeId || !record.date) continue;
 
-          // Safe Conversion
-          // Agar employeeId object hai to string banao, agar string hai to waise hi use karo
           const empIdStr = record.employeeId.toString(); 
           const dateStr = moment(record.date).format("YYYY-MM-DD");
 
@@ -187,22 +180,17 @@ const removeDuplicates = async (req, res) => {
 
   } catch (err) {
     console.error("❌ CRITICAL ERROR (removeDuplicates):", err);
-    // 500 bhejne se pehle error ka reason client ko batao
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// ... existing exports
 
-
-/* ================== FILE SYSTEM SETUP ================== */
 const UPLOADS_DIR = path.join(__dirname, "..", "uploads");
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const PROFILE_DIR = path.join(UPLOADS_DIR, "profiles");
 if (!fs.existsSync(PROFILE_DIR)) fs.mkdirSync(PROFILE_DIR, { recursive: true });
 
-/* ================== UTILITY FUNCTIONS ================== */
 const officeLocation = { latitude: 22.88925, longitude: 86.99116 };
 
 const getBranchLocation = async (branchId) => {
@@ -224,17 +212,13 @@ const isWithinBranchRange = (uLat, uLon, bLat, bLon, radius) => {
 const getISTDate = () => moment.tz(new Date(), "Asia/Kolkata").toDate();
 const getCurrentTime = () => moment.tz("Asia/Kolkata").format("hh:mm:ss A");
 
-// ✅ FIX: Robust Time Comparison Logic (Handles 10:00 AM vs 05:00 PM correctly)
 const isShiftOver = (currentTime, shiftEndTime) => {
-    // Convert both to moment objects on the same dummy date to compare time only
     const now = moment(currentTime, "hh:mm:ss A");
     const end = moment(shiftEndTime, ["HH:mm", "hh:mm A", "h:mm A"]);
     
-    // Check if current time is after end time
     return now.isAfter(end);
 };
 
-// --- PRIORITY WINDOW LOGIC (Shift > Branch > Default) ---
 const getEffectiveWindow = async (employee) => {
     if (employee.shiftId) {
         const shift = await Shift.findById(employee.shiftId);
@@ -247,8 +231,6 @@ const getEffectiveWindow = async (employee) => {
     return { start: "09:00", end: "18:00" };
 };
 
-// --- METRICS CALCULATION (FIXED LOGIC) ---
-// --- METRICS CALCULATION (ROBUST FIX) ---
 const calculateMetrics = (logs, windowStart, windowEnd) => {
     let workedMinutes = 0;
     let overtimeMinutes = 0;
@@ -293,8 +275,6 @@ const calculateMetrics = (logs, windowStart, windowEnd) => {
     
     return { workedMinutes, overtimeMinutes };
 };
-
-/* ================== CONTROLLERS ================== */
 
 // 1. MARK ATTENDANCE (FIRST CHECK-IN)
 const markAttendance = async (req, res) => {
@@ -476,63 +456,220 @@ const updateAttendance = async (req, res) => {
 };
 
 // 4. ADMIN APPROVE ACTION
+// 4. ADMIN APPROVE ACTION & MANAGE OVERTIME
 const adminApproveAction = async (req, res) => {
   try {
-    const { attendanceId, action, manualOutTime, approveOT } = req.body;
+    // 🚀 Frontend se bheja gaya accurate data receive karo
+    const { attendanceId, action, manualOutTime, overtimeMinutes, approveOT } = req.body;
+    
     const attendance = await attendanceTbl.findById(attendanceId).populate('employeeId');
     if (!attendance) return res.status(404).json({ message: "Record not found" });
 
-    // A. FIX MISSING CHECKOUT
+    // --- A. FIX MISSING CHECKOUT ---
     if (action === "MANUAL_CHECKOUT") {
       const lastLog = attendance.inOutLogs[attendance.inOutLogs.length - 1];
-      if (!lastLog.outTime) {
+      if (lastLog && !lastLog.outTime) {
         const window = await getEffectiveWindow(attendance.employeeId);
         
         if (manualOutTime) {
             lastLog.outTime = manualOutTime; 
         } else {
             // Auto Shift End Time
-            // Parse shift end time safely
             const endM = moment(window.end, ["HH:mm", "hh:mm A"]);
             lastLog.outTime = endM.format("hh:mm:ss A");
         }
         attendance.statusType = "Manual";
+
+        // Checkout hone par metrics automatically calculate karo
+        const metrics = calculateMetrics(attendance.inOutLogs, window.start, window.end);
+        attendance.workedMinutes = metrics.workedMinutes;
+        attendance.overtimeMinutes = metrics.overtimeMinutes;
+        // Agar overtime nahi hai, to by default true rakho, warna false (taaki admin check kare)
+        attendance.overtimeApproved = metrics.overtimeMinutes <= 0;
+      }
+    } 
+    // --- B. MANAGE OVERTIME (APPROVE & EDIT) ---
+    else if (action === "UPDATE_OT") {
+      // 🚀 Admin ne Overtime manually edit ya approve kiya hai
+      if (overtimeMinutes !== undefined) {
+          attendance.overtimeMinutes = Number(overtimeMinutes) || 0;
+      }
+      if (approveOT !== undefined) {
+          attendance.overtimeApproved = Boolean(approveOT);
       }
     }
 
-    // B. APPROVE / REJECT OVERTIME
-    if (action === "APPROVE_OT") {
-      attendance.overtimeApproved = approveOT;
-    }
-
-    // C. RECALCULATE
-    const window = await getEffectiveWindow(attendance.employeeId);
-    const metrics = calculateMetrics(attendance.inOutLogs, window.start, window.end);
-    
-    attendance.workedMinutes = metrics.workedMinutes;
-    attendance.overtimeMinutes = metrics.overtimeMinutes;
-
-    if (attendance.overtimeMinutes <= 0) attendance.overtimeApproved = true;
-
     await attendance.save();
-    res.json({ success: true, message: "Action Completed", data: attendance });
+    res.json({ success: true, message: "Action Completed Successfully", data: attendance });
+
   } catch (err) {
+    console.error("Approve Action Error:", err);
     res.status(500).json({ message: "Server Error" });
   }
 };
-
-// --- READ OPERATIONS (UNCHANGED) ---
 const getMonthlyAttendance = async (req, res) => {
   try {
     const { month } = req.query;
-    if (!month) return res.status(400).json({ success: false, message: "Month required" });
+    const companyId = req.companyId;
 
-    const startOfMonth = moment.tz(month, "YYYY-MM", "Asia/Kolkata").startOf("month").toDate();
-    const endOfMonth = moment.tz(month, "YYYY-MM", "Asia/Kolkata").endOf("month").toDate();
+    if (!month) {
+      return res.status(400).json({
+        success: false,
+        message: "Month required"
+      });
+    }
 
-    const records = await attendanceTbl.find({ date: { $gte: startOfMonth, $lte: endOfMonth } }).populate("employeeId", "name email");
-    res.status(200).json({ success: true, data: records });
-  } catch (err) { res.status(500).json({ success: false, message: "Server Error" }); }
+    const startOfMonth = moment
+      .tz(month, "YYYY-MM", "Asia/Kolkata")
+      .startOf("month");
+
+    const endOfMonth = moment
+      .tz(month, "YYYY-MM", "Asia/Kolkata")
+      .endOf("month");
+
+    const daysInMonth = startOfMonth.daysInMonth();
+
+    /* ================= EMPLOYEES ================= */
+
+    const employees = await userTbl.find({
+      companyId,
+      role: "employee",
+      status: "active"
+    });
+
+    /* ================= ATTENDANCE ================= */
+
+    const records = await attendanceTbl.find({
+      companyId,
+      date: {
+        $gte: startOfMonth.toDate(),
+        $lte: endOfMonth.toDate()
+      }
+    });
+
+    /* ================= LEAVES ================= */
+
+    const leaves = await Leave.find({
+      companyId,
+      status: "Approved",
+      startDate: { $lte: endOfMonth.toDate() },
+      endDate: { $gte: startOfMonth.toDate() }
+    });
+
+    /* ================= HOLIDAYS ================= */
+
+    const holidays = await Holiday.find({ companyId });
+
+    /* ================= SETTINGS ================= */
+
+    let settings = await LeaveSettings.findOne({ companyId });
+    if (!settings) settings = { isSaturdayOff: true, isSundayOff: true };
+
+    /* ================= FINAL RESULT ================= */
+
+    const result = employees.map(emp => {
+
+      let attendance = {};
+      let present = 0;
+      let absent = 0;
+      let late = 0;
+      let leave = 0;
+
+      for (let day = 1; day <= daysInMonth; day++) {
+
+        const date = startOfMonth.clone().date(day);
+        const dateStr = date.format("YYYY-MM-DD");
+        const dayOfWeek = date.day();
+
+        /* ===== FIND ATTENDANCE ===== */
+
+        const record = records.find(r =>
+          r.employeeId.toString() === emp._id.toString() &&
+          moment(r.date).format("YYYY-MM-DD") === dateStr
+        );
+
+        /* ===== FIND LEAVE ===== */
+
+        const leaveRecord = leaves.find(l =>
+          l.employeeId.toString() === emp._id.toString() &&
+          moment(dateStr).isBetween(
+            moment(l.startDate),
+            moment(l.endDate),
+            "day",
+            "[]"
+          )
+        );
+
+        /* ===== FIND HOLIDAY ===== */
+
+        const holiday = holidays.find(h =>
+          moment(dateStr).isBetween(
+            moment(h.startDate),
+            moment(h.endDate),
+            "day",
+            "[]"
+          )
+        );
+
+        /* ================= LOGIC ================= */
+
+        if (record) {
+
+          attendance[day] = record.status;
+
+          if (record.status === "Present") present++;
+          if (record.status === "Late") late++;
+          if (record.status === "On Leave") leave++;
+          if (record.status === "Absent") absent++;
+
+        } else if (leaveRecord) {
+
+          attendance[day] = "On Leave";
+          leave++;
+
+        } else if (holiday) {
+
+          attendance[day] = "Holiday";
+
+        } else if (
+          (dayOfWeek === 0 && settings.isSundayOff) ||
+          (dayOfWeek === 6 && settings.isSaturdayOff)
+        ) {
+
+          attendance[day] = "Weekly Off";
+
+        } else {
+
+          attendance[day] = "Absent";
+          absent++;
+        }
+      }
+
+      return {
+        employeeId: emp._id,
+        name: emp.name,
+        attendance,
+        present,
+        absent,
+        late,
+        leave
+      };
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+
+  } catch (err) {
+
+    console.error("Monthly Attendance Error:", err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server Error"
+    });
+  }
 };
 
 const getAllAttendance = async (req, res) => {
@@ -575,48 +712,129 @@ const deleteAttendance = async (req, res) => {
   } catch (err) { res.status(500).json({ success: false, message: "Server Error" }); }
 };
 
+// ====== AttendanceController.js ======
+
 const bulkMarkAttendance = async (req, res) => {
   try {
-    const { employeeIds, date } = req.body;
-    if (!employeeIds || !date) return res.status(400).json({ success: false, message: "Missing fields" });
+    const { employeeIds, startDate, endDate } = req.body;
+    const companyId = req.companyId; // Middleware se companyId le rahe hain
+    
+    if (!employeeIds || employeeIds.length === 0 || !startDate || !endDate) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
 
-    const newAttendances = [];
-    for (const empId of employeeIds) {
-      const exists = await attendanceTbl.findOne({
-        employeeId: empId,
-        date: { $gte: new Date(date), $lt: new Date(new Date(date).getTime() + 86400000) },
-      });
+    const start = moment.tz(startDate, "YYYY-MM-DD", "Asia/Kolkata").startOf('day');
+    const end = moment.tz(endDate, "YYYY-MM-DD", "Asia/Kolkata").startOf('day');
 
-      if (!exists) {
-        const emp = await userTbl.findById(empId).populate('shiftId');
-        const window = await getEffectiveWindow(emp);
-        const shiftStart = window.start;
-        const shiftEnd = window.end;
+    if (end.isBefore(start)) {
+      return res.status(400).json({ success: false, message: "End Date cannot be before Start Date" });
+    }
 
-        const startM = moment(shiftStart, ["HH:mm", "hh:mm A"]);
-        const endM = moment(shiftEnd, ["HH:mm", "hh:mm A"]);
-        const worked = endM.diff(startM, 'minutes');
+    // 🔥 1. Get Company Settings for Weekends and Holidays
+    let settings = await LeaveSettings.findOne({ companyId });
+    if (!settings) settings = { isSaturdayOff: true, isSundayOff: true };
+    const holidays = await Holiday.find({ companyId });
 
-        const newAtt = new attendanceTbl({
-          employeeId: empId,
-          companyId: emp.companyId,
-          branchId: emp.branchId,
-          date,
-          inTime: shiftStart,
-          status: "Present",
-          statusType: "Manual",
-          inOutLogs: [{ inTime: shiftStart, outTime: shiftEnd }],
-          workedMinutes: worked > 0 ? worked : 480,
-          overtimeMinutes: 0,
-          overtimeApproved: true
+    const employees = await userTbl.find({ _id: { $in: employeeIds } }).populate('shiftId');
+    let processedCount = 0; 
+
+    for (const emp of employees) {
+      const window = await getEffectiveWindow(emp);
+      const shiftStart = window.start || "09:00 AM";
+      const shiftEnd = window.end || "06:00 PM";
+
+      const startM = moment(shiftStart, ["HH:mm", "hh:mm A"]);
+      const finishM = moment(shiftEnd, ["HH:mm", "hh:mm A"]);
+      const worked = finishM.diff(startM, 'minutes');
+
+      let loopDate = start.clone();
+      
+      while (loopDate.isSameOrBefore(end)) {
+        const currentDateStart = loopDate.clone().startOf('day').toDate();
+        const currentDateEnd = loopDate.clone().endOf('day').toDate();
+        const dateStr = loopDate.format("YYYY-MM-DD");
+        const dayOfWeek = loopDate.day(); // 0 = Sunday, 6 = Saturday
+
+        // 🔥 2. Decide the Target Status (Default is Present)
+        let targetStatus = "Present";
+
+        // Check Weekly Off
+        if ((dayOfWeek === 0 && settings.isSundayOff) || (dayOfWeek === 6 && settings.isSaturdayOff)) {
+          targetStatus = "Weekly Off";
+        }
+
+        // Check Holidays
+        const isHoliday = holidays.some(h => {
+          const hStart = moment(h.startDate).format("YYYY-MM-DD");
+          const hEnd = moment(h.endDate).format("YYYY-MM-DD");
+          return dateStr >= hStart && dateStr <= hEnd;
         });
 
-        await newAtt.save();
-        newAttendances.push(newAtt);
+        if (isHoliday) {
+          targetStatus = "Holiday";
+        }
+
+        // Check if attendance already exists
+        const exists = await attendanceTbl.findOne({
+          employeeId: emp._id,
+          date: { $gte: currentDateStart, $lte: currentDateEnd },
+        });
+
+        const safeDate = loopDate.clone().add(12, 'hours').toDate();
+
+        if (!exists) {
+          // CONDITION 1: Create New Record
+          const newAtt = new attendanceTbl({
+            employeeId: emp._id,
+            companyId: emp.companyId,
+            branchId: emp.branchId,
+            date: safeDate, 
+            inTime: targetStatus === "Present" ? shiftStart : "00:00",
+            outTime: targetStatus === "Present" ? shiftEnd : "00:00",
+            status: targetStatus,
+            statusType: "Manual",
+            inOutLogs: targetStatus === "Present" ? [{ inTime: shiftStart, outTime: shiftEnd }] : [],
+            workedMinutes: targetStatus === "Present" ? (worked > 0 ? worked : 480) : 0,
+            overtimeMinutes: 0,
+            overtimeApproved: true,
+            adminCheckoutTime: targetStatus !== "Present" ? targetStatus : undefined
+          });
+
+          await newAtt.save();
+          processedCount++;
+          
+        } else if (exists.status === "Absent") {
+          // CONDITION 2: Update "Absent" to correct status (Present / Weekly Off / Holiday)
+          exists.status = targetStatus;
+          exists.statusType = "Manual";
+          exists.inTime = targetStatus === "Present" ? shiftStart : "00:00";
+          exists.outTime = targetStatus === "Present" ? shiftEnd : "00:00";
+          exists.inOutLogs = targetStatus === "Present" ? [{ inTime: shiftStart, outTime: shiftEnd }] : [];
+          exists.workedMinutes = targetStatus === "Present" ? (worked > 0 ? worked : 480) : 0;
+          exists.overtimeMinutes = 0;
+          exists.overtimeApproved = true;
+          
+          if(targetStatus !== "Present") {
+            exists.adminCheckoutTime = targetStatus;
+          }
+
+          await exists.save();
+          processedCount++;
+        }
+        
+        loopDate.add(1, 'days');
       }
     }
-    res.status(200).json({ success: true, message: `Added ${newAttendances.length} records`, data: newAttendances });
-  } catch (err) { res.status(500).json({ success: false, message: "Server Error" }); }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Successfully processed! Added/Updated ${processedCount} records.`, 
+    });
+
+  } catch (err) { 
+    console.error("Bulk Mark Error:", err);
+    res.status(500).json({ success: false, message: "Server Error" }); 
+  }
 };
 
 module.exports = {

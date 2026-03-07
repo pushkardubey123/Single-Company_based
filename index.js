@@ -40,7 +40,7 @@ app.use("/api/designations", require("./Router/designationRouter"));
 app.use("/api/shifts", require("./Router/ShiftRouter"));
 app.use("/api/projects", require("./Router/projectRoutes"));
 app.use("/api/leaves", require("./Router/LeaveRouter"));
-app.use("/api/attendance", require("./Router/AttendenceRouter"));
+app.use("/api/attendance", require("./Router/AttendanceRouter"));
 app.use("/api/payrolls", require("./Router/PayrollsRouter"));
 app.use("/api/documents", require("./Router/documentRoutes"));
 app.use("/api/exit", require("./Router/exitRoutes"));

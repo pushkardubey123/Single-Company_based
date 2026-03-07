@@ -1,4 +1,4 @@
-const attendanceTbl = require("../Modals/Attendence");
+const attendanceTbl = require("../Modals/Attendance");
 const mongoose = require("mongoose");
 const moment = require("moment");
 

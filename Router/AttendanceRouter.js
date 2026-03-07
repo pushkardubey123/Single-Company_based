@@ -15,7 +15,7 @@ const {
   adminApproveAction,
   syncPastAttendance,
   removeDuplicates
-} = require("../Controllers/AttendenceController");
+} = require("../Controllers/AttendanceController");
 
 // 🔐 AUTH REQUIRED
 router.post("/mark", auth,attachCompanyId, markAttendance);

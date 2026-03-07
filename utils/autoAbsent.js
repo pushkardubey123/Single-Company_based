@@ -1,7 +1,7 @@
 const cron = require("node-cron");
 const moment = require("moment-timezone");
 
-const Attendance = require("../Modals/Attendence");
+const Attendance = require("../Modals/Attendance");
 const User = require("../Modals/User");
 const OfficeTiming = require("../Modals/OfficeTiming");
 const Leave = require("../Modals/Leave");
