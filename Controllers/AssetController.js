@@ -192,18 +192,43 @@ const getMyAssets = async (req, res) => {
   }
 };
 
+const getAvailableAssetNames = async (req, res) => {
+  try {
+    const assets = await Asset.find({ companyId: req.companyId }).select("assetName category assetType");
+    
+    // Duplicate naam hatane ke liye (Agar 10 iPhone 15 hain toh dropdown me 1 hi dikhe)
+    const uniqueAssets = [];
+    const seen = new Set();
+    assets.forEach(a => {
+      if (!seen.has(a.assetName)) {
+        seen.add(a.assetName);
+        uniqueAssets.push({ assetName: a.assetName, category: a.category, assetType: a.assetType });
+      }
+    });
+    
+    res.json({ success: true, data: uniqueAssets });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+// 🔥 UPDATE: Admin panel me naam dikhane ke liye requestedAssetName add kiya
 const requestAssetManual = async (req, res) => {
   try {
-    const { category, notes } = req.body;
+    const { requestedAssetName, requestedAssetType, requestedCategory, notes } = req.body;
+    
     const newRequest = await AssetAssignment.create({
       companyId: req.companyId,
       branchId: req.user.branchId,
       employeeId: req.user._id,
       issueDate: new Date(),
       status: "Requested",
-      requestedCategory: category,
-      notes: notes || `Manual request for ${category}`,
+      requestedAssetName: requestedAssetName, // Yeh Admin panel me show hoga
+      requestedAssetType: requestedAssetType || "Unique",
+      requestedCategory: requestedCategory || "Other",
+      notes: notes || `Manual request for ${requestedAssetName}`,
     });
+    
     res.status(201).json({ success: true, message: "Asset request submitted", data: newRequest });
   } catch (err) {
     res.status(500).json({ success: false, message: "Failed to submit request" });
@@ -243,5 +268,5 @@ const deleteOnboardingRule = async (req, res) => {
 };
 
 module.exports = {
-  createAsset, updateAsset, deleteAsset, getAllAssets, getAllAssignments, assignAssetToEmployee, returnAsset, getMyAssets, requestAssetManual, getOnboardingRules, createOnboardingRule, deleteOnboardingRule,
+  createAsset, updateAsset, deleteAsset, getAllAssets, getAllAssignments, assignAssetToEmployee,getAvailableAssetNames, returnAsset, getMyAssets, requestAssetManual, getOnboardingRules, createOnboardingRule, deleteOnboardingRule,
 };

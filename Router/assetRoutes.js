@@ -15,12 +15,14 @@ const {
   requestAssetManual,
   createOnboardingRule,
   deleteOnboardingRule,
-  getOnboardingRules
+  getOnboardingRules,
+  getAvailableAssetNames
 } = require("../Controllers/AssetController");
 
 // Employee Self Service
 router.get("/my-assets", auth, attachCompanyId, getMyAssets);
 router.post("/request", auth, attachCompanyId, requestAssetManual);
+router.get("/available-names", auth, attachCompanyId, getAvailableAssetNames);
 
 // IT Inventory Management
 router.post("/inventory", auth, attachCompanyId, checkPermission("asset_management", "create"), createAsset);
