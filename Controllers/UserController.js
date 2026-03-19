@@ -88,11 +88,31 @@ const initializeLeaveBalance = async (companyId, employeeId) => {
 const register = async (req, res) => {
   try {
     const {
-      name, email, password, phone, gender, dob, address,
-      departmentId, designationId, shiftId, doj, emergencyContact,
+      name, email, password, phone, role, // <-- Add 'role' here
+      gender, dob, address, departmentId, designationId, shiftId, doj, emergencyContact,
       pan, bankAccount, branchId, basicSalary,
     } = req.body;
 
+    // --- NEW LOGIC: Handle Admin Registration ---
+    if (role === "admin") {
+      const emailExists = await userTbl.findOne({ email });
+      if (emailExists) return res.status(400).json({ success: false, message: "Email already exists" });
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      
+      const newAdmin = new userTbl({
+        name, email, phone, passwordHash, 
+        role: "admin", status: "active",
+        authProvider: "local"
+      });
+      
+      newAdmin.companyId = newAdmin._id; // An admin acts as their own Company ID
+      await newAdmin.save();
+
+      return res.status(201).json({ success: true, message: "Admin account created successfully!" });
+    }
+
+    // --- EXISTING LOGIC: Handle Employee Registration ---
     const finalCompanyId = req.user && req.user.role === "admin"
         ? req.user.companyId
         : req.body.companyId;
