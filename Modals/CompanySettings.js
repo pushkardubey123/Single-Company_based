@@ -9,7 +9,7 @@ const authorizedPersonSchema = new mongoose.Schema({
 
 const attendanceSchema = new mongoose.Schema({
   gpsRequired: { type: Boolean, default: true }, 
-  faceRequired: { type: Boolean, default: false }, // Yeh trigger hai
+  faceRequired: { type: Boolean, default: false },
   lateMarkTime: { type: String, default: "09:30" }, 
   earlyLeaveTime: { type: String, default: "17:30" }, 
 });
@@ -34,6 +34,10 @@ const companySchema = new mongoose.Schema({
   cinNumber: { type: String, default: "" },
   attendance: { type: attendanceSchema, default: () => ({}) },
   authorizedPersons: { type: [authorizedPersonSchema], default: [] },
+  
+  // ✅ NAYA FIELD: AUTO PAYROLL DATE KE LIYE (e.g., 1 for 1st of month)
+  payrollGenerationDate: { type: Number, default: 1, min: 1, max: 31 },
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });

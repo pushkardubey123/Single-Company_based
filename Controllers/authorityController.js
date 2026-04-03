@@ -2,7 +2,7 @@ const Permission = require("../Modals/Permission")
 
 exports.setPermission = async(req,res)=>{
   try{
-    const {employeeId, module, permissions} = req.body; // ✅ Using employeeId
+    const {employeeId, module, permissions} = req.body; 
     const data = await Permission.findOneAndUpdate(
       { companyId: req.companyId, employeeId, module },
       { permissions },

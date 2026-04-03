@@ -4,6 +4,8 @@ const dbConnect = require("./Dbconnect/dbConfig");
 const fileupload = require("express-fileupload");
 const cors = require("cors");
 const path = require("path");
+const cron = require('node-cron');
+const { processAutoScheduledPayrolls } = require('./Controllers/PayrollController');
 
 const timesheetRoutes = require("./Router/timesheetRoutes");
 const holidayRoutes = require("./Router/Leave/holiday.routes");
@@ -52,7 +54,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ COOP FIX (Google Auth popup fix)
 app.use((req, res, next) => {
   res.header("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
   res.header("Cross-Origin-Embedder-Policy", "unsafe-none");
@@ -65,6 +66,15 @@ require("./utils/taskDeadlineNotifier")();
 require("./utils/birthdayAnniversaryNotifier")();
 require("./utils/autoAbsent")();
 require("./utils/subscriptionNotifier")();
+cron.schedule('1 0 * * *', async () => {
+    console.log("⏳ Running Scheduled Auto-Payroll Check...");
+    try {
+        await processAutoScheduledPayrolls();
+        console.log("✅ Scheduled Auto-Payroll Check Complete.");
+    } catch (error) {
+        console.error("❌ Scheduled Auto-Payroll Error:", error);
+    }
+});
 
 app.use(express.json());
 

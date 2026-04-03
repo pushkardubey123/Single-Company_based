@@ -4,7 +4,7 @@ const holidaySchema = new mongoose.Schema({
   companyId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   name: { type: String, required: true },
   
-  // 🔥 RANGE SUPPORT: Single day ke liye start=end same rahega
+
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   

@@ -410,5 +410,5 @@ module.exports = {
   updateLeaveStatus,
   deleteLeave,
   getLeavesByEmployee,
-  getLeaveReport,
+  getLeaveReport, 
 };

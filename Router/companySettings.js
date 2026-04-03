@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const CompanySettings = require("../Modals/CompanySettings");
-const CompanySubscription = require("../Modals/SuperAdmin/CompanySubscription"); // ✅ NAYA
+const CompanySubscription = require("../Modals/SuperAdmin/CompanySubscription");
 const fs = require("fs");
 const path = require("path");
 const auth = require("../Middleware/auth");
@@ -9,7 +9,6 @@ const attachCompanyId = require("../Middleware/companyMiddleware");
 const checkPermission = require("../Middleware/checkPermission");
 const checkSubscription = require("../Middleware/checkSubscription"); 
 
-// Max file size for Logo (e.g., 2MB)
 const MAX_FILE_SIZE = 2 * 1024 * 1024; 
 
 router.get("/", auth, attachCompanyId, checkSubscription, async (req, res) => {
@@ -49,26 +48,25 @@ router.put("/", auth, attachCompanyId, checkSubscription, checkPermission("setti
         earlyLeaveTime: req.body.earlyLeaveTime || "17:30",
       },
       authorizedPersons: authorizedPersons,
+      
+      // ✅ NAYA PAYROLL DATE UPDATE LOGIC
+      payrollGenerationDate: Number(req.body.payrollGenerationDate) || 1,
     };
 
     let storageChangeMB = 0;
 
-    // 🔥 File Handle & Storage Calculation
     if (req.files && req.files.logo) {
       const logoFile = req.files.logo;
-      
-      // ✅ STATIC LIMIT CHECK (2MB)
       if (logoFile.size > MAX_FILE_SIZE) {
          return res.status(400).json({ success: false, message: "Logo size must be less than 2MB" });
       }
 
-      // Find old settings to subtract old logo size
       const oldSettings = await CompanySettings.findOne({ companyId: req.companyId });
       if (oldSettings && oldSettings.logo) {
          const oldFilePath = path.join(__dirname, "..", oldSettings.logo.replace("/static", "uploads"));
          if (fs.existsSync(oldFilePath)) {
             storageChangeMB -= (fs.statSync(oldFilePath).size / (1024 * 1024));
-            fs.unlinkSync(oldFilePath); // Delete old logo
+            fs.unlinkSync(oldFilePath); 
          }
       }
 
@@ -77,7 +75,6 @@ router.put("/", auth, attachCompanyId, checkSubscription, checkPermission("setti
       await logoFile.mv(savePath);
       updateData.logo = `/static/logo/${fileName}`;
       
-      // Add new logo size
       storageChangeMB += (logoFile.size / (1024 * 1024));
     }
 
@@ -87,7 +84,6 @@ router.put("/", auth, attachCompanyId, checkSubscription, checkPermission("setti
       { new: true, upsert: true }
     );
 
-    // 🔥 DB Storage Update
     if (storageChangeMB !== 0) {
        await CompanySubscription.findOneAndUpdate(
          { companyId: req.companyId },
@@ -97,27 +93,23 @@ router.put("/", auth, attachCompanyId, checkSubscription, checkPermission("setti
 
     res.json({ success: true, data: settings });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ success: false, message: "Update failed" });
   }
 });
 
 router.delete("/logo", auth, attachCompanyId, checkSubscription, checkPermission("settings", "delete"), async (req, res) => {
+  // (Your existing logo deletion logic remains exactly same here)
   try {
     const settings = await CompanySettings.findOne({ companyId: req.companyId });
     if (settings?.logo) {
       const filePath = path.join(__dirname, "..", settings.logo.replace("/static", "uploads"));
       let sizeToMinus = 0;
-      
       if (fs.existsSync(filePath)) {
          sizeToMinus = fs.statSync(filePath).size / (1024 * 1024);
          fs.unlinkSync(filePath);
       }
-      
       settings.logo = "";
       await settings.save();
-
-      // 🔥 Reduce Storage
       if(sizeToMinus > 0) {
         await CompanySubscription.findOneAndUpdate(
           { companyId: req.companyId },

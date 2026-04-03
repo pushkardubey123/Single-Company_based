@@ -94,7 +94,7 @@ const initializeLeaveBalance = async (companyId, employeeId) => {
   }
 };
 
-/* ================= REGISTER ================= */
+
 const register = async (req, res) => {
   try {
     const {
@@ -111,17 +111,34 @@ const register = async (req, res) => {
       const newAdmin = new userTbl({
         name, email, phone, passwordHash, role: "admin", status: "active", authProvider: "local"
       });
-      newAdmin.companyId = newAdmin._id;
+      newAdmin.companyId = newAdmin._id; // Admin ki companyId wo khud hai
       await newAdmin.save();
       await assignTrialPlan(newAdmin._id);
-      return res.status(201).json({ success: true, message: "Admin account created successfully with Trial Plan!" });
+
+      // 🔥 FIX: GENERATE AND RETURN TOKEN FOR PAYMENT GATEWAY 🔥
+      const token = jwt.sign(
+        { 
+          id: newAdmin._id, 
+          role: newAdmin.role, 
+          companyId: newAdmin._id, 
+          designationId: newAdmin.designationId 
+        }, 
+        process.env.JWT_SECRET, 
+        { expiresIn: "1d" }
+      );
+
+      return res.status(201).json({ 
+        success: true, 
+        message: "Admin account created successfully with Trial Plan!",
+        token: token // This is crucial for the next /create-order step
+      });
     }
 
-    // 🔥 MANUAL TOKEN VERIFICATION (KYUNKI YE PUBLIC ROUTE HAI)
-    const token = req.headers.authorization?.split(" ")[1];
+    // --- EMPLOYEE REGISTRATION (Public or Admin Adding) ---
+    const tokenHeader = req.headers.authorization?.split(" ")[1];
     let decodedAdmin = null;
-    if (token) {
-      try { decodedAdmin = jwt.verify(token, process.env.JWT_SECRET); } catch (e) { }
+    if (tokenHeader && tokenHeader !== "undefined" && tokenHeader !== "null") {
+      try { decodedAdmin = jwt.verify(tokenHeader, process.env.JWT_SECRET); } catch (e) { }
     }
 
     const isAdminAdding = decodedAdmin && decodedAdmin.role === "admin";
@@ -145,12 +162,10 @@ const register = async (req, res) => {
     if (emailExists) return res.status(400).json({ success: false, message: "Email already exists" });
 
     let profilePic = null;
-    let storageAddedMB = 0; // 🔥 NAYA
+    let storageAddedMB = 0; 
 
     if (req.files?.profilePic) {
       const img = req.files.profilePic;
-      
-      // ✅ STATIC SIZE CHECK
       if (img.size > MAX_PROFILE_PIC_SIZE) {
          return res.status(400).json({ success: false, message: "Profile picture must be under 2MB" });
       }
@@ -177,7 +192,6 @@ const register = async (req, res) => {
       await user.save();
       await initializeLeaveBalance(user._id, finalCompanyId);
 
-      // 🔥 ADD STORAGE 🔥
       if (storageAddedMB > 0) {
          await CompanySubscription.findOneAndUpdate(
            { companyId: finalCompanyId },
@@ -185,7 +199,6 @@ const register = async (req, res) => {
          );
       }
 
-      // Call Asset Trigger
       try {
         const OnboardingRule = require("../Modals/Asset/OnboardingRule");
         const rules = await OnboardingRule.find({ companyId: finalCompanyId });
@@ -212,7 +225,6 @@ const register = async (req, res) => {
 
     await pendingUser.save();
 
-    // 🔥 ADD STORAGE FOR PENDING USERS TOO 🔥 (Kyunki file server par save hui hai)
     if (storageAddedMB > 0) {
       await CompanySubscription.findOneAndUpdate(
         { companyId: finalCompanyId },
@@ -226,6 +238,7 @@ const register = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
+
 
 /* ================= APPROVE PENDING USER ================= */
 const approvePendingUser = async (req, res) => {
